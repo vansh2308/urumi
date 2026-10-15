@@ -50,19 +50,28 @@ class Container:
         logger.info("resources released")
 
 
+_LOCAL_ADDRESS = {"auto": None, "ipv4": "0.0.0.0", "ipv6": "::"}  # noqa: S104 - bind side only
+
+
 def build_http_client(settings: WooCommerceSettings) -> httpx.AsyncClient:
+    # Binding the local side to 0.0.0.0 / :: makes the resolver look up only that address family.
+    transport = httpx.AsyncHTTPTransport(
+        verify=settings.verify_tls,
+        limits=httpx.Limits(
+            max_connections=settings.max_connections,
+            max_keepalive_connections=settings.max_keepalive_connections,
+        ),
+        local_address=_LOCAL_ADDRESS[settings.ip_family],
+        trust_env=False,
+    )
     return httpx.AsyncClient(
+        transport=transport,
         timeout=httpx.Timeout(
             connect=settings.connect_timeout_seconds,
             read=settings.read_timeout_seconds,
             write=settings.write_timeout_seconds,
             pool=settings.pool_timeout_seconds,
         ),
-        limits=httpx.Limits(
-            max_connections=settings.max_connections,
-            max_keepalive_connections=settings.max_keepalive_connections,
-        ),
-        verify=settings.verify_tls,
         follow_redirects=False,  # a redirect would invalidate the OAuth signature / leak auth
         headers={"User-Agent": f"woocommerce-mcp/{__version__}"},
         trust_env=False,

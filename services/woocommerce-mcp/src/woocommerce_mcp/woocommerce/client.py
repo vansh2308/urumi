@@ -184,6 +184,7 @@ class WooCommerceClient:
                             "path": path,
                             "attempt": attempt,
                             "error_code": retry.error.code,
+                            "cause": type(retry.__cause__).__name__,
                             "duration_ms": elapsed_ms,
                         },
                     )
@@ -196,6 +197,7 @@ class WooCommerceClient:
                         "path": path,
                         "attempt": attempt,
                         "error_code": retry.error.code,
+                        "cause": type(retry.__cause__).__name__,
                         "retry_in_s": round(delay, 3),
                         "duration_ms": elapsed_ms,
                     },

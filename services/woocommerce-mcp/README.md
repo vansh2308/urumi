@@ -135,6 +135,10 @@ poetry run alembic upgrade head
 poetry run woocommerce-mcp  # serves http://127.0.0.1:8000/mcp
 ```
 
+On macOS, keep `WC_IP_FAMILY=ipv4` for `*.local` store names: the system resolver spends about
+5 s on an IPv6 mDNS lookup before using `/etc/hosts`, which would exhaust the connect timeout
+and surface as `upstream_unavailable`.
+
 Generate the key under *WooCommerce → Settings → Advanced → REST API* for the local store at
 `http://wordpress.local:8080`. Try the tools with the MCP Inspector
 (`npx @modelcontextprotocol/inspector`, transport *Streamable HTTP*, URL

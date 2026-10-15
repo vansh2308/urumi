@@ -54,6 +54,12 @@ class WooCommerceSettings(BaseSettings):
     )
     oauth_signature_method: Literal["HMAC-SHA256", "HMAC-SHA1"] = "HMAC-SHA256"
     verify_tls: bool = True
+    ip_family: Literal["auto", "ipv4", "ipv6"] = Field(
+        default="auto",
+        description="Restrict DNS resolution/connections to one IP family. 'ipv4' avoids the "
+        "~5 s IPv6 (AAAA) mDNS lookup macOS does for *.local names listed in /etc/hosts, which "
+        "otherwise eats the whole connect timeout.",
+    )
 
     connect_timeout_seconds: float = Field(default=5.0, gt=0)
     read_timeout_seconds: float = Field(default=20.0, gt=0)
