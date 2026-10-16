@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.config import ApiKeySettings, RateLimitSettings
 from gateway.db.engine import Database
-from gateway.db.models import AuditOutcome, Team, TeamMembership, TeamRole, User
+from gateway.db.models import ApiKey, AuditOutcome, Team, TeamMembership, TeamRole, User
 from gateway.errors import ConflictError, InvalidInputError, NotFoundError, PermissionDeniedError
 from gateway.services.audit import AuditLog
 from gateway.services.principal import Principal
@@ -261,6 +261,17 @@ class TeamService:
             if membership.role == TeamRole.ADMIN.value:
                 await self._ensure_another_admin(session, ctx.team_id, user_id)
             await session.execute(delete(TeamMembership).where(TeamMembership.id == membership.id))
+            # Keys would already fail authentication without the membership; revoking them
+            # makes that explicit and keeps them dead if the user is re-invited later.
+            await session.execute(
+                update(ApiKey)
+                .where(
+                    ApiKey.team_id == ctx.team_id,
+                    ApiKey.owner_user_id == user_id,
+                    ApiKey.revoked_at.is_(None),
+                )
+                .values(revoked_at=func.now(), revoked_by_user_id=ctx.principal.user_id)
+            )
             self._audit.add(
                 session,
                 action="member.remove",

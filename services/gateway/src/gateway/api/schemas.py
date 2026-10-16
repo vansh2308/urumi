@@ -12,7 +12,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from gateway.db.models import TeamRole
+from gateway.db.models import ApiKeyScope, TeamRole
 
 
 class RequestModel(BaseModel):
@@ -151,3 +151,47 @@ class IssuedInvitationOut(InvitationOut):
 
 class AcceptInvitationRequest(RequestModel):
     token: str = Field(min_length=20, max_length=128)
+
+
+# --- API keys -----------------------------------------------------------------------------------
+
+
+class CreateApiKeyRequest(RequestModel):
+    name: Annotated[str, Field(min_length=1, max_length=100)]
+    scopes: Annotated[list[ApiKeyScope], Field(min_length=1, max_length=3)] = Field(
+        default_factory=lambda: [ApiKeyScope.TOOLS_READ, ApiKeyScope.TOOLS_CALL]
+    )
+    expires_in_days: int | None = Field(
+        default=None, ge=1, description="Defaults to the platform default, capped by team policy."
+    )
+    tool_restrictions: Annotated[list[str], Field(min_length=1, max_length=100)] | None = Field(
+        default=None,
+        description="Narrow the key to these 'connector-slug/tool' or 'connector-slug/*' "
+        "entries. It never grants more than the owner's own access.",
+    )
+
+
+class RotateApiKeyRequest(RequestModel):
+    grace_hours: int = Field(
+        default=0, ge=0, description="Keep the old key working this long (0 = revoke now)."
+    )
+
+
+class ApiKeyOut(BaseModel):
+    id: uuid.UUID
+    team_id: uuid.UUID
+    owner_user_id: uuid.UUID
+    name: str
+    prefix: str = Field(description="First characters of the key, for identification.")
+    scopes: list[ApiKeyScope]
+    tool_restrictions: list[str] | None
+    status: str
+    created_at: datetime
+    expires_at: datetime
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+    rotated_from_id: uuid.UUID | None
+
+
+class IssuedApiKeyOut(ApiKeyOut):
+    key: str = Field(description="The urk_ secret. Shown once; it cannot be retrieved later.")

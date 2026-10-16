@@ -19,7 +19,7 @@ from starlette.middleware.cors import CORSMiddleware
 from gateway import __version__
 from gateway.api.errors import install_error_handlers
 from gateway.api.middleware import BodySizeLimitMiddleware, RequestContextMiddleware
-from gateway.api.routes import auth, health, teams
+from gateway.api.routes import api_keys, auth, health, teams
 from gateway.config import Settings
 from gateway.container import Container, build_container
 from gateway.errors import AppError
@@ -67,6 +67,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(teams.router)
+    app.include_router(api_keys.router)
 
     # The last middleware added is the outermost: request context wraps everything, so even
     # 413 and CORS responses carry a request id and are counted.

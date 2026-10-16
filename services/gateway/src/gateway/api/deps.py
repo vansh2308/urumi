@@ -47,7 +47,8 @@ async def get_principal(
     principal = await authenticate_bearer(container, credentials.credentials)
     status = await container.rate_limiter.hit(
         principal.rate_limit_bucket,
-        limit=container.settings.rate_limit.per_principal_per_minute,
+        limit=principal.rate_limit_per_minute
+        or container.settings.rate_limit.per_principal_per_minute,
         scope=principal.credential.value,
     )
     if status is not None:
@@ -63,6 +64,8 @@ async def authenticate_bearer(container: Container, raw: str) -> Principal:
     try:
         if kind is TokenKind.SESSION:
             return await container.auth.authenticate_session(raw)
+        if kind is TokenKind.API_KEY:
+            return await container.api_keys.authenticate(raw)
         raise AuthenticationError()
     except AuthenticationError:
         container.metrics.auth_failures.labels(kind=kind.name.lower() if kind else "unknown").inc()

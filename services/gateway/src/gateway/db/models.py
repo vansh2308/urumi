@@ -20,11 +20,11 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Bumped by every migration; /health/ready fails until the database is at this revision.
-SCHEMA_REVISION = "0002"
+SCHEMA_REVISION = "0003"
 # Own version table so the gateway can share a PostgreSQL database with other services.
 VERSION_TABLE = "gateway_alembic_version"
 
@@ -189,3 +189,44 @@ class Invitation(Base):
         ForeignKey("users.id", ondelete="SET NULL")
     )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ApiKeyScope(StrEnum):
+    TOOLS_READ = "tools:read"  # discover servers and tools
+    TOOLS_CALL = "tools:call"  # invoke tools (REST or the MCP endpoint)
+    USAGE_READ = "usage:read"  # read the owner's own usage records
+
+
+class ApiKey(Base):
+    """A platform API key (``urk_...``) owned by one user within one team.
+
+    These are gateway credentials for platform clients. They are unrelated to downstream
+    integration credentials such as WooCommerce consumer keys, which stay in the upstream MCP
+    server and are never stored, returned or forwarded by the gateway.
+    """
+
+    __tablename__ = "api_keys"
+    __table_args__ = (Index("ix_api_keys_team_id_owner_user_id", "team_id", "owner_user_id"),)
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
+    owner_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(100))
+    prefix: Mapped[str] = mapped_column(String(16))
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    scopes: Mapped[list[str]] = mapped_column(ARRAY(String(32)))
+    # "connector/tool" or "connector/*" entries narrowing the owner's access; NULL = no narrowing.
+    tool_restrictions: Mapped[list[str] | None] = mapped_column(ARRAY(String(200)))
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = _created_at()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    rotated_from_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("api_keys.id", ondelete="SET NULL")
+    )

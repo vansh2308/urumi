@@ -16,6 +16,7 @@ from gateway.config import Settings
 from gateway.db.engine import Database, create_engine, create_session_factory
 from gateway.metrics import Metrics
 from gateway.security import PasswordService, TokenHasher
+from gateway.services.api_keys import ApiKeyService
 from gateway.services.audit import AuditLog
 from gateway.services.auth import AuthService
 from gateway.services.invitations import InvitationService
@@ -37,6 +38,7 @@ class Container:
     auth: AuthService
     teams: TeamService
     invitations: InvitationService
+    api_keys: ApiKeyService
 
     async def aclose(self) -> None:
         """Release pooled connections. Called once, after in-flight requests have drained."""
@@ -72,4 +74,5 @@ def build_container(settings: Settings) -> Container:
         invitations=InvitationService(
             db, tokens=tokens, teams=teams, auth=auth, audit=audit, settings=settings.auth
         ),
+        api_keys=ApiKeyService(db, tokens=tokens, audit=audit, settings=settings.api_keys),
     )
