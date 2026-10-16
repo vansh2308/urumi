@@ -17,6 +17,7 @@ from gateway.config import Settings
 from gateway.db.engine import Database, create_engine, create_session_factory
 from gateway.metrics import Metrics
 from gateway.security import PasswordService, TokenHasher
+from gateway.services.activity import ActivityService, RetentionService
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.audit import AuditLog
 from gateway.services.auth import AuthService
@@ -47,6 +48,8 @@ class Container:
     upstream: McpUpstreamClient
     connectors: ConnectorService
     tools: ToolService
+    activity: ActivityService
+    retention: RetentionService
 
     async def aclose(self) -> None:
         """Release pooled connections. Called once, after in-flight requests have drained."""
@@ -77,6 +80,7 @@ def build_container(settings: Settings) -> Container:
     connectors = ConnectorService(
         db, upstream=upstream, teams=teams, audit=audit, settings=settings.upstream
     )
+    rate_limiter = RateLimiter(db, metrics, enabled=settings.rate_limit.enabled)
     return Container(
         settings=settings,
         engine=engine,
@@ -85,7 +89,7 @@ def build_container(settings: Settings) -> Container:
         metrics=metrics,
         tokens=tokens,
         audit=audit,
-        rate_limiter=RateLimiter(db, metrics, enabled=settings.rate_limit.enabled),
+        rate_limiter=rate_limiter,
         auth=auth,
         teams=teams,
         invitations=InvitationService(
@@ -102,4 +106,6 @@ def build_container(settings: Settings) -> Container:
             audit=audit,
             metrics=metrics,
         ),
+        activity=ActivityService(db),
+        retention=RetentionService(db, rate_limiter=rate_limiter, settings=settings.retention),
     )

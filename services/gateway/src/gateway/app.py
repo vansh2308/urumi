@@ -23,7 +23,7 @@ from gateway.api.deps import API_PREFIX
 from gateway.api.errors import install_error_handlers
 from gateway.api.mcp_proxy import McpProxy
 from gateway.api.middleware import BodySizeLimitMiddleware, RequestContextMiddleware
-from gateway.api.routes import api_keys, auth, connectors, health, teams
+from gateway.api.routes import activity, api_keys, auth, connectors, health, teams
 from gateway.config import Settings
 from gateway.container import Container, build_container
 from gateway.errors import AppError
@@ -78,6 +78,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(api_keys.router)
     app.include_router(connectors.registry)
     app.include_router(connectors.team)
+    app.include_router(activity.router)
     app.router.routes.append(
         Route(f"{API_PREFIX}/mcp/{{connector}}", mcp_proxy, methods=["GET", "POST", "DELETE"])
     )
@@ -121,10 +122,12 @@ def _start_purge_loop(container: Container) -> asyncio.Task[None] | None:
         while True:
             await asyncio.sleep(interval)
             try:
-                deleted = await container.rate_limiter.purge()
+                deleted = await container.retention.purge()
                 if deleted:
-                    logger.info("purged expired rows", extra={"deleted": deleted})
+                    logger.info("purged expired rows", extra=deleted)
             except AppError:
                 logger.warning("purge failed; will retry")
+            except Exception:
+                logger.exception("purge errored; will retry")
 
     return asyncio.create_task(loop(), name="retention-purge")

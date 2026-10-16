@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, EmailStr, Field
 
 from gateway.db.models import ApiKeyScope, TeamRole
 
@@ -288,3 +288,63 @@ class GrantOut(BaseModel):
 
 class CallToolRequest(RequestModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+# --- audit and usage ----------------------------------------------------------------------------
+
+
+class AuditEventOut(ResponseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    created_at: datetime
+    team_id: uuid.UUID | None
+    actor_user_id: uuid.UUID | None
+    actor_api_key_id: uuid.UUID | None
+    action: str
+    target_type: str | None
+    target_id: str | None
+    outcome: str
+    request_id: str | None
+    ip: Annotated[str | None, BeforeValidator(lambda v: None if v is None else str(v))]
+    details: dict[str, Any]
+
+
+class InvocationOut(ResponseModel):
+    id: uuid.UUID
+    created_at: datetime
+    user_id: uuid.UUID
+    api_key_id: uuid.UUID | None
+    connector_slug: str
+    tool_name: str
+    transport: str
+    outcome: str
+    error_code: str | None
+    duration_ms: int
+    request_id: str | None
+
+
+class AuditPage(BaseModel):
+    items: list[AuditEventOut]
+    next_cursor: str | None = Field(description="Pass as ?cursor= for the next (older) page.")
+
+
+class InvocationPage(BaseModel):
+    items: list[InvocationOut]
+    next_cursor: str | None
+
+
+class SummaryRowOut(BaseModel):
+    key: str
+    calls: int
+    errors: int = Field(description="Calls whose outcome was not success.")
+    denied: int
+    avg_duration_ms: float
+    p95_duration_ms: float
+
+
+class UsageSummaryOut(BaseModel):
+    group_by: str
+    since: datetime | None
+    until: datetime | None
+    rows: list[SummaryRowOut]
