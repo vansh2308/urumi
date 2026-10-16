@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+import httpx
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from gateway.config import Settings
@@ -19,9 +20,12 @@ from gateway.security import PasswordService, TokenHasher
 from gateway.services.api_keys import ApiKeyService
 from gateway.services.audit import AuditLog
 from gateway.services.auth import AuthService
+from gateway.services.connectors import ConnectorService
 from gateway.services.invitations import InvitationService
 from gateway.services.rate_limit import RateLimiter
 from gateway.services.teams import TeamService
+from gateway.services.tools import ToolService
+from gateway.upstream.client import McpUpstreamClient, build_upstream_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +34,7 @@ logger = logging.getLogger(__name__)
 class Container:
     settings: Settings
     engine: AsyncEngine
+    http_client: httpx.AsyncClient
     db: Database
     metrics: Metrics
     tokens: TokenHasher
@@ -39,10 +44,16 @@ class Container:
     teams: TeamService
     invitations: InvitationService
     api_keys: ApiKeyService
+    upstream: McpUpstreamClient
+    connectors: ConnectorService
+    tools: ToolService
 
     async def aclose(self) -> None:
         """Release pooled connections. Called once, after in-flight requests have drained."""
-        await self.engine.dispose()
+        try:
+            await self.http_client.aclose()
+        finally:
+            await self.engine.dispose()
         logger.info("resources released")
 
 
@@ -61,9 +72,15 @@ def build_container(settings: Settings) -> Container:
         api_key_settings=settings.api_keys,
         rate_limit_settings=settings.rate_limit,
     )
+    http_client = build_upstream_http_client(settings.upstream)
+    upstream = McpUpstreamClient(http_client, settings=settings.upstream, metrics=metrics)
+    connectors = ConnectorService(
+        db, upstream=upstream, teams=teams, audit=audit, settings=settings.upstream
+    )
     return Container(
         settings=settings,
         engine=engine,
+        http_client=http_client,
         db=db,
         metrics=metrics,
         tokens=tokens,
@@ -75,4 +92,14 @@ def build_container(settings: Settings) -> Container:
             db, tokens=tokens, teams=teams, auth=auth, audit=audit, settings=settings.auth
         ),
         api_keys=ApiKeyService(db, tokens=tokens, audit=audit, settings=settings.api_keys),
+        upstream=upstream,
+        connectors=connectors,
+        tools=ToolService(
+            db,
+            teams=teams,
+            connectors=connectors,
+            upstream=upstream,
+            audit=audit,
+            metrics=metrics,
+        ),
     )

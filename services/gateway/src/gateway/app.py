@@ -4,6 +4,7 @@ Routes
 ------
 * ``/health/live``, ``/health/ready``, ``/metrics``: probes and Prometheus metrics.
 * ``/v1/...``: versioned REST API (OpenAPI at ``/docs`` when enabled).
+* ``/v1/mcp/{connector}``: MCP Streamable HTTP endpoint for MCP clients (API key auth).
 """
 
 from __future__ import annotations
@@ -15,11 +16,14 @@ from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
+from starlette.routing import Route
 
 from gateway import __version__
+from gateway.api.deps import API_PREFIX
 from gateway.api.errors import install_error_handlers
+from gateway.api.mcp_proxy import McpProxy
 from gateway.api.middleware import BodySizeLimitMiddleware, RequestContextMiddleware
-from gateway.api.routes import api_keys, auth, health, teams
+from gateway.api.routes import api_keys, auth, connectors, health, teams
 from gateway.config import Settings
 from gateway.container import Container, build_container
 from gateway.errors import AppError
@@ -36,13 +40,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         service_name=settings.app.service_name,
     )
     container = build_container(settings)
+    mcp_proxy = McpProxy(container)
 
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         logger.info("starting", extra={"version": __version__, "env": settings.app.app_env.value})
         purge_task = _start_purge_loop(container)
         try:
-            yield
+            # Owns the task group running MCP requests; leaving it (after uvicorn has drained
+            # connections on SIGTERM) cancels stragglers before resources are released.
+            async with mcp_proxy.session_manager.run():
+                yield
         finally:
             if purge_task is not None:
                 purge_task.cancel()
@@ -68,6 +76,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(auth.router)
     app.include_router(teams.router)
     app.include_router(api_keys.router)
+    app.include_router(connectors.registry)
+    app.include_router(connectors.team)
+    app.router.routes.append(
+        Route(f"{API_PREFIX}/mcp/{{connector}}", mcp_proxy, methods=["GET", "POST", "DELETE"])
+    )
 
     # The last middleware added is the outermost: request context wraps everything, so even
     # 413 and CORS responses carry a request id and are counted.

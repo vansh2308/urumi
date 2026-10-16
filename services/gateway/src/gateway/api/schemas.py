@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -195,3 +195,96 @@ class ApiKeyOut(BaseModel):
 
 class IssuedApiKeyOut(ApiKeyOut):
     key: str = Field(description="The urk_ secret. Shown once; it cannot be retrieved later.")
+
+
+# --- connectors ---------------------------------------------------------------------------------
+
+Slug = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")]
+ToolName = Annotated[str, Field(pattern=r"^[A-Za-z0-9_.\-]{1,128}$")]
+
+
+class RegisterConnectorRequest(RequestModel):
+    slug: Slug = Field(description="Stable identifier clients use, e.g. 'woocommerce'.")
+    display_name: Annotated[str, Field(min_length=1, max_length=100)]
+    description: Annotated[str, Field(max_length=500)] = ""
+    url: Annotated[str, Field(max_length=500)] = Field(
+        description="Streamable HTTP endpoint, e.g. http://127.0.0.1:8000/mcp. Must match "
+        "UPSTREAM_ALLOWED_HOSTS."
+    )
+    timeout_seconds: float | None = Field(default=None, gt=0)
+    max_concurrency: int | None = Field(default=None, ge=1, le=1000)
+
+
+class UpdateConnectorRequest(RequestModel):
+    display_name: Annotated[str, Field(min_length=1, max_length=100)] | None = None
+    description: Annotated[str, Field(max_length=500)] | None = None
+    url: Annotated[str, Field(max_length=500)] | None = None
+    enabled: bool | None = None
+    timeout_seconds: float | None = Field(default=None, gt=0)
+    max_concurrency: int | None = Field(default=None, ge=1, le=1000)
+
+
+class ConnectorOut(BaseModel):
+    """Registry entry. ``url`` and limits are only shown to platform admins."""
+
+    id: uuid.UUID
+    slug: str
+    display_name: str
+    description: str
+    enabled: bool
+    url: str | None = None
+    timeout_seconds: float | None = None
+    max_concurrency: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ToolOut(BaseModel):
+    name: str
+    title: str | None = None
+    description: str | None = None
+
+
+class ProbeOut(BaseModel):
+    server_name: str
+    server_version: str
+    protocol_version: str
+    tools: list[ToolOut]
+
+
+class ToolPolicyRequest(RequestModel):
+    allow_all_tools: bool = False
+    tools: Annotated[list[ToolName], Field(max_length=500)] = Field(default_factory=list)
+
+
+class ToolSetOut(BaseModel):
+    allow_all_tools: bool
+    tools: list[str]
+
+
+class TeamConnectorOut(BaseModel):
+    slug: str
+    display_name: str
+    description: str
+    team_policy: ToolSetOut | None = Field(
+        default=None, description="Tools enabled for the team (admins only)."
+    )
+    your_access: ToolSetOut = Field(description="Tools the caller may use.")
+
+
+class CatalogEntryOut(ToolOut):
+    allowed_for_team: bool
+
+
+class GrantOut(BaseModel):
+    connector: str
+    allow_all_tools: bool
+    tools: list[str]
+    updated_at: datetime
+
+
+# --- tool invocation ----------------------------------------------------------------------------
+
+
+class CallToolRequest(RequestModel):
+    arguments: dict[str, Any] = Field(default_factory=dict)

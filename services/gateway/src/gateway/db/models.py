@@ -11,6 +11,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -24,7 +25,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Bumped by every migration; /health/ready fails until the database is at this revision.
-SCHEMA_REVISION = "0003"
+SCHEMA_REVISION = "0004"
 # Own version table so the gateway can share a PostgreSQL database with other services.
 VERSION_TABLE = "gateway_alembic_version"
 
@@ -230,3 +231,93 @@ class ApiKey(Base):
     rotated_from_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("api_keys.id", ondelete="SET NULL")
     )
+
+
+class Connector(Base):
+    """A registered upstream MCP server. Managed by platform admins only.
+
+    Clients address connectors by ``slug``; the URL is set at registration (and checked against
+    ``UPSTREAM_ALLOWED_HOSTS``) and is never taken from a client request.
+    """
+
+    __tablename__ = "connectors"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    slug: Mapped[str] = mapped_column(String(64), unique=True)
+    display_name: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str] = mapped_column(String(500), default="")
+    url: Mapped[str] = mapped_column(String(500))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    timeout_seconds: Mapped[float] = mapped_column(Float)
+    max_concurrency: Mapped[int] = mapped_column(Integer)
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _created_at()
+
+
+class TeamConnector(Base):
+    """A connector enabled for a team, with the tools the team may use (admins get these)."""
+
+    __tablename__ = "team_connectors"
+    __table_args__ = (
+        UniqueConstraint("team_id", "connector_id", name="uq_team_connectors_team_id_connector_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
+    connector_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("connectors.id", ondelete="CASCADE"))
+    allow_all_tools: Mapped[bool] = mapped_column(Boolean, default=False)
+    allowed_tools: Mapped[list[str]] = mapped_column(ARRAY(String(128)), default=list)
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _created_at()
+
+
+class MemberToolGrant(Base):
+    """Tools of one team connector that one (non-admin) member may use."""
+
+    __tablename__ = "member_tool_grants"
+    __table_args__ = (
+        UniqueConstraint(
+            "membership_id", "connector_id", name="uq_member_tool_grants_membership_id_connector_id"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    membership_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("team_memberships.id", ondelete="CASCADE")
+    )
+    connector_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("connectors.id", ondelete="CASCADE"))
+    allow_all_tools: Mapped[bool] = mapped_column(Boolean, default=False)
+    tools: Mapped[list[str]] = mapped_column(ARRAY(String(128)), default=list)
+    granted_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _created_at()
+
+
+class ToolInvocation(Base):
+    """One authorized (or denied) tool call: the usage record. Arguments are never stored."""
+
+    __tablename__ = "tool_invocations"
+    __table_args__ = (
+        Index("ix_tool_invocations_team_id_created_at", "team_id", "created_at"),
+        Index("ix_tool_invocations_team_id_user_id_created_at", "team_id", "user_id", "created_at"),
+        Index("ix_tool_invocations_created_at", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    created_at: Mapped[datetime] = _created_at()
+    team_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    api_key_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    connector_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    connector_slug: Mapped[str] = mapped_column(String(64))
+    tool_name: Mapped[str] = mapped_column(String(128))
+    transport: Mapped[str] = mapped_column(String(8))  # rest | mcp
+    outcome: Mapped[str] = mapped_column(String(32))
+    error_code: Mapped[str | None] = mapped_column(String(64))
+    duration_ms: Mapped[int] = mapped_column(Integer)
+    request_id: Mapped[str | None] = mapped_column(String(128))
