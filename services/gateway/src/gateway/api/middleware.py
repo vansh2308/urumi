@@ -99,7 +99,13 @@ class _BodyTooLargeError(Exception):
 
 async def _too_large(send: Send) -> None:
     body = json.dumps(
-        {"error": {"code": "payload_too_large", "message": "Request body is too large."}}
+        {
+            "error": {
+                "code": "payload_too_large",
+                "message": "Request body is too large.",
+                "request_id": request_id_var.get(),
+            }
+        }
     ).encode()
     await send(
         {

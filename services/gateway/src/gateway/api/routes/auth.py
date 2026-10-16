@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 from fastapi import APIRouter, Request, status
 
 from gateway.api.deps import (
@@ -28,7 +30,9 @@ async def _throttle_auth(container: ContainerDep, request: Request, email: str) 
     limit = container.settings.rate_limit.auth_per_minute
     limiter = container.rate_limiter
     await limiter.hit(f"auth-ip:{client_ip(request)}", limit=limit * 3, scope="auth")
-    await limiter.hit(f"auth-email:{normalise_email(email)}", limit=limit, scope="auth")
+    # Hashed so the bucket key is bounded and holds no raw email address.
+    email_key = hashlib.sha256(normalise_email(email).encode()).hexdigest()[:32]
+    await limiter.hit(f"auth-email:{email_key}", limit=limit, scope="auth")
 
 
 @router.post("/auth/register", status_code=status.HTTP_201_CREATED, response_model=UserOut)

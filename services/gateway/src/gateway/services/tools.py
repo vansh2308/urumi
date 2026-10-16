@@ -82,6 +82,7 @@ class ToolService:
         started = time.perf_counter()
         team_ctx: TeamContext | None = None
         connector_id: uuid.UUID | None = None
+        permitted = False
         outcome = "internal_error"
         error_code: str | None = None
         try:
@@ -99,6 +100,7 @@ class ToolService:
                     details={"reason": "tool_not_permitted"},
                 )
                 raise PermissionDeniedError("You are not permitted to call this tool.")
+            permitted = True
             result = await self._upstream.call_tool(access.target, call.tool, arguments)
             if result.isError:
                 outcome = "tool_error"
@@ -126,6 +128,7 @@ class ToolService:
                     error_code,
                     duration,
                     persist=team_ctx is not None,  # never write into a team the caller is not in
+                    permitted=permitted,
                 )
 
     async def _authorize(self, call: CallContext) -> TeamContext:
@@ -144,10 +147,12 @@ class ToolService:
         duration: float,
         *,
         persist: bool,
+        permitted: bool,
     ) -> None:
-        # Unknown connector slugs are client input; keep them out of metric labels.
+        # Unknown slugs and tool names are client input; keep them out of metric labels so
+        # label cardinality stays bounded by the registry and the team policies.
         label = call.connector_slug if connector_id is not None else "unknown"
-        tool_label = call.tool if connector_id is not None else "unknown"
+        tool_label = call.tool if permitted else "unauthorized"
         self._metrics.tool_invocations.labels(
             connector=label, tool=tool_label, outcome=outcome
         ).inc()
