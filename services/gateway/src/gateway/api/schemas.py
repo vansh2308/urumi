@@ -12,6 +12,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
+from gateway.db.models import TeamRole
+
 
 class RequestModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -32,6 +34,12 @@ class RegisterRequest(RequestModel):
     email: EmailStr
     password: Password
     display_name: DisplayName
+    invitation_token: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Optional uri_ token. Joins the team on registration and is required when "
+        "self-signup is disabled.",
+    )
 
 
 class LoginRequest(RequestModel):
@@ -54,6 +62,92 @@ class SessionOut(BaseModel):
     user: UserOut
 
 
+class MembershipOut(BaseModel):
+    team_id: uuid.UUID
+    team_name: str
+    team_slug: str
+    role: TeamRole
+
+
 class MeOut(BaseModel):
     user: UserOut
-    credential: str
+    credential: str = Field(description="session or api_key")
+    api_key_id: uuid.UUID | None = None
+    teams: list[MembershipOut]
+
+
+# --- teams --------------------------------------------------------------------------------------
+
+TeamName = Annotated[str, Field(min_length=1, max_length=100)]
+
+
+class CreateTeamRequest(RequestModel):
+    name: TeamName
+
+
+class UpdateTeamRequest(RequestModel):
+    name: TeamName | None = None
+    members_can_create_keys: bool | None = Field(
+        default=None, description="Whether members may create API keys for themselves."
+    )
+    max_key_ttl_days: int | None = Field(default=None, ge=1)
+    rate_limit_per_minute: int | None = Field(
+        default=None,
+        ge=1,
+        description="Requests per minute for each API key or session in this team. Set "
+        "reset_rate_limit=true instead to fall back to the platform default.",
+    )
+    reset_rate_limit: bool = False
+
+
+class TeamOut(ResponseModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+    members_can_create_keys: bool
+    max_key_ttl_days: int
+    rate_limit_per_minute: int | None
+    created_at: datetime
+
+
+class TeamWithRoleOut(TeamOut):
+    role: TeamRole = Field(description="The caller's role in this team.")
+
+
+class MemberOut(ResponseModel):
+    user_id: uuid.UUID
+    email: str
+    display_name: str
+    role: TeamRole
+    joined_at: datetime
+
+
+class ChangeRoleRequest(RequestModel):
+    role: TeamRole
+
+
+# --- invitations --------------------------------------------------------------------------------
+
+
+class CreateInvitationRequest(RequestModel):
+    email: EmailStr
+    role: TeamRole = TeamRole.MEMBER
+
+
+class InvitationOut(BaseModel):
+    id: uuid.UUID
+    team_id: uuid.UUID
+    email: str
+    role: TeamRole
+    status: str
+    created_at: datetime
+    expires_at: datetime
+    accepted_at: datetime | None
+
+
+class IssuedInvitationOut(InvitationOut):
+    token: str = Field(description="uri_ token. Shown once; deliver it to the invitee.")
+
+
+class AcceptInvitationRequest(RequestModel):
+    token: str = Field(min_length=20, max_length=128)

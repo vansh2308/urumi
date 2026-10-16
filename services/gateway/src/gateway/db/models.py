@@ -16,13 +16,15 @@ from sqlalchemy import (
     Integer,
     MetaData,
     String,
+    UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Bumped by every migration; /health/ready fails until the database is at this revision.
-SCHEMA_REVISION = "0001"
+SCHEMA_REVISION = "0002"
 # Own version table so the gateway can share a PostgreSQL database with other services.
 VERSION_TABLE = "gateway_alembic_version"
 
@@ -119,3 +121,71 @@ class RateLimitCounter(Base):
     bucket: Mapped[str] = mapped_column(String(200), primary_key=True)
     window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
     count: Mapped[int] = mapped_column(Integer)
+
+
+class TeamRole(StrEnum):
+    ADMIN = "admin"
+    MEMBER = "member"
+
+
+class Team(Base):
+    __tablename__ = "teams"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    name: Mapped[str] = mapped_column(String(100))
+    slug: Mapped[str] = mapped_column(String(64), unique=True)
+    # Team-wide settings managed by team admins.
+    members_can_create_keys: Mapped[bool] = mapped_column(Boolean, default=True)
+    max_key_ttl_days: Mapped[int] = mapped_column(Integer, default=90)
+    rate_limit_per_minute: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _created_at()
+
+
+class TeamMembership(Base):
+    __tablename__ = "team_memberships"
+    __table_args__ = (
+        UniqueConstraint("team_id", "user_id", name="uq_team_memberships_team_id_user_id"),
+        CheckConstraint("role IN ('admin', 'member')", name="role_valid"),
+        Index("ix_team_memberships_user_id", "user_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    role: Mapped[str] = mapped_column(String(16))
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _created_at()
+
+
+class Invitation(Base):
+    """An invitation to join a team. Only the HMAC of the invitation token is stored."""
+
+    __tablename__ = "invitations"
+    __table_args__ = (
+        CheckConstraint("role IN ('admin', 'member')", name="role_valid"),
+        # At most one open invitation per email and team.
+        Index(
+            "uq_invitations_team_id_email_open",
+            "team_id",
+            "email",
+            unique=True,
+            postgresql_where=text("accepted_at IS NULL AND revoked_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
+    email: Mapped[str] = mapped_column(String(320))
+    role: Mapped[str] = mapped_column(String(16))
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    invited_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = _created_at()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    accepted_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL")
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

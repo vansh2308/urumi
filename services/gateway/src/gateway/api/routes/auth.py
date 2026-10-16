@@ -11,7 +11,14 @@ from gateway.api.deps import (
     SessionPrincipalDep,
     client_ip,
 )
-from gateway.api.schemas import LoginRequest, MeOut, RegisterRequest, SessionOut, UserOut
+from gateway.api.schemas import (
+    LoginRequest,
+    MembershipOut,
+    MeOut,
+    RegisterRequest,
+    SessionOut,
+    UserOut,
+)
 from gateway.services.auth import normalise_email
 
 router = APIRouter(prefix=API_PREFIX, tags=["auth"])
@@ -28,9 +35,17 @@ async def _throttle_auth(container: ContainerDep, request: Request, email: str) 
 async def register(body: RegisterRequest, request: Request, container: ContainerDep) -> UserOut:
     """Create an account. Disabled when ``AUTH_ALLOW_SIGNUP=false``."""
     await _throttle_auth(container, request, body.email)
-    user = await container.auth.register(
-        email=body.email, password=body.password, display_name=body.display_name
-    )
+    if body.invitation_token:
+        user = await container.invitations.register_and_accept(
+            raw_token=body.invitation_token,
+            email=body.email,
+            password=body.password,
+            display_name=body.display_name,
+        )
+    else:
+        user = await container.auth.register(
+            email=body.email, password=body.password, display_name=body.display_name
+        )
     return UserOut.model_validate(user)
 
 
@@ -61,4 +76,17 @@ async def logout(principal: SessionPrincipalDep, container: ContainerDep) -> Non
 async def me(principal: PrincipalDep, container: ContainerDep) -> MeOut:
     """The authenticated user (session or API key)."""
     user = await container.auth.get_user(principal.user_id)
-    return MeOut(user=UserOut.model_validate(user), credential=principal.credential.value)
+    memberships = await container.teams.list_for_user(principal.user_id)
+    if principal.api_key_team_id is not None:  # a key only sees the team it belongs to
+        memberships = [m for m in memberships if m.team.id == principal.api_key_team_id]
+    return MeOut(
+        user=UserOut.model_validate(user),
+        credential=principal.credential.value,
+        api_key_id=principal.api_key_id,
+        teams=[
+            MembershipOut(
+                team_id=m.team.id, team_name=m.team.name, team_slug=m.team.slug, role=m.role
+            )
+            for m in memberships
+        ],
+    )

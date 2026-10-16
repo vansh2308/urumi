@@ -21,6 +21,8 @@ class Principal:
     credential: CredentialKind
     session_id: uuid.UUID | None = None
     api_key_id: uuid.UUID | None = None
+    # An API key is bound to exactly one team; sessions are not bound to any.
+    api_key_team_id: uuid.UUID | None = None
 
     @property
     def rate_limit_bucket(self) -> str:

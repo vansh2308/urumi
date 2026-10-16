@@ -18,7 +18,9 @@ from gateway.metrics import Metrics
 from gateway.security import PasswordService, TokenHasher
 from gateway.services.audit import AuditLog
 from gateway.services.auth import AuthService
+from gateway.services.invitations import InvitationService
 from gateway.services.rate_limit import RateLimiter
+from gateway.services.teams import TeamService
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,8 @@ class Container:
     audit: AuditLog
     rate_limiter: RateLimiter
     auth: AuthService
+    teams: TeamService
+    invitations: InvitationService
 
     async def aclose(self) -> None:
         """Release pooled connections. Called once, after in-flight requests have drained."""
@@ -46,6 +50,15 @@ def build_container(settings: Settings) -> Container:
     metrics = Metrics()
     tokens = TokenHasher(settings.auth.token_pepper)
     audit = AuditLog(db)
+    auth = AuthService(
+        db, passwords=PasswordService(), tokens=tokens, audit=audit, settings=settings.auth
+    )
+    teams = TeamService(
+        db,
+        audit=audit,
+        api_key_settings=settings.api_keys,
+        rate_limit_settings=settings.rate_limit,
+    )
     return Container(
         settings=settings,
         engine=engine,
@@ -54,11 +67,9 @@ def build_container(settings: Settings) -> Container:
         tokens=tokens,
         audit=audit,
         rate_limiter=RateLimiter(db, metrics, enabled=settings.rate_limit.enabled),
-        auth=AuthService(
-            db,
-            passwords=PasswordService(),
-            tokens=tokens,
-            audit=audit,
-            settings=settings.auth,
+        auth=auth,
+        teams=teams,
+        invitations=InvitationService(
+            db, tokens=tokens, teams=teams, auth=auth, audit=audit, settings=settings.auth
         ),
     )

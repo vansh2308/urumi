@@ -7,15 +7,17 @@ using the principal and the team membership loaded fresh from the database.
 
 from __future__ import annotations
 
+import uuid
 from typing import Annotated
 
-from fastapi import Depends, Request, Response, Security
+from fastapi import Depends, Path, Request, Response, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from gateway.container import Container
 from gateway.errors import AuthenticationError, PermissionDeniedError
 from gateway.security import TokenHasher, TokenKind
 from gateway.services.principal import CredentialKind, Principal
+from gateway.services.teams import TeamContext
 
 API_PREFIX = "/v1"
 
@@ -78,6 +80,27 @@ async def require_session(principal: PrincipalDep) -> Principal:
 
 
 SessionPrincipalDep = Annotated[Principal, Depends(require_session)]
+
+
+async def get_team_context(
+    team_id: Annotated[uuid.UUID, Path()],
+    principal: PrincipalDep,
+    container: ContainerDep,
+) -> TeamContext:
+    """Membership of the caller in the team named by the path, loaded fresh per request."""
+    return await container.teams.context(principal, team_id)
+
+
+TeamDep = Annotated[TeamContext, Depends(get_team_context)]
+
+
+async def get_team_session_context(
+    ctx: TeamDep, _: Annotated[Principal, Depends(require_session)]
+) -> TeamContext:
+    return ctx
+
+
+TeamSessionDep = Annotated[TeamContext, Depends(get_team_session_context)]
 
 
 def client_ip(request: Request) -> str | None:
