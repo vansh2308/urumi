@@ -20,6 +20,11 @@ from agent.llm.base import LlmProvider
 from agent.llm.factory import build_provider
 from agent.llm.gemini import build_llm_http_client
 from agent.metrics import Metrics
+from agent.services.conversations import ConversationStore
+from agent.services.runner import AgentRunner
+from agent.services.tool_executor import ToolExecutor
+from agent.services.toolbox import ToolDiscovery
+from agent.services.usage import UsageService
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +39,10 @@ class Container:
     metrics: Metrics
     gateway: GatewayClient
     llm: LlmProvider
+    conversations: ConversationStore
+    tools: ToolDiscovery
+    runner: AgentRunner
+    usage: UsageService
 
     async def aclose(self) -> None:
         """Release pooled connections. Called once, after in-flight requests have drained."""
@@ -50,13 +59,30 @@ def build_container(settings: Settings) -> Container:
     metrics = Metrics()
     gateway_http = build_gateway_http_client(settings.gateway)
     llm_http = build_llm_http_client(settings.llm)
+    db = Database(create_session_factory(engine))
+    gateway = GatewayClient(gateway_http, settings=settings.gateway, metrics=metrics)
+    llm = build_provider(settings, llm_http, metrics)
+    conversations = ConversationStore(db, settings=settings.run, metrics=metrics)
+    tools = ToolDiscovery(gateway, settings=settings.run)
     return Container(
         settings=settings,
         engine=engine,
         gateway_http=gateway_http,
         llm_http=llm_http,
-        db=Database(create_session_factory(engine)),
+        db=db,
         metrics=metrics,
-        gateway=GatewayClient(gateway_http, settings=settings.gateway, metrics=metrics),
-        llm=build_provider(settings, llm_http, metrics),
+        gateway=gateway,
+        llm=llm,
+        conversations=conversations,
+        tools=tools,
+        runner=AgentRunner(
+            store=conversations,
+            discovery=tools,
+            executor=ToolExecutor(gateway, settings=settings.run, metrics=metrics),
+            llm=llm,
+            settings=settings.run,
+            llm_settings=settings.llm,
+            metrics=metrics,
+        ),
+        usage=UsageService(db),
     )
