@@ -164,7 +164,7 @@ cd services/agent
 poetry install
 cp .env.example .env              # set DB_URL (its own database), GATEWAY_URL, GEMINI_API_KEY
 poetry run alembic upgrade head
-poetry run agent                  # serves http://127.0.0.1:8200
+poetry run agent                  # serves http://127.0.0.1:8201
 ```
 
 ## Deployment notes

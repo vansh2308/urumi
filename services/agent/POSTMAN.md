@@ -18,10 +18,10 @@ cd services/agent
 poetry install
 cp .env.example .env    # DB_URL (its own database), GATEWAY_URL, GEMINI_API_KEY
 poetry run alembic upgrade head
-poetry run agent        # http://127.0.0.1:8200
+poetry run agent        # http://127.0.0.1:8201
 ```
 
-Check `GET http://127.0.0.1:8200/health/ready` returns `{"status": "ready"}`.
+Check `GET http://127.0.0.1:8201/health/ready` returns `{"status": "ready"}`.
 
 ## 2. Get two gateway API keys
 
@@ -38,7 +38,7 @@ Any key works as long as it has the `tools:read` and `tools:call` scopes (the de
 
 1. Postman → **Import** → choose the collection file.
 2. Collection → **Variables**: paste the admin's key into `apiKey` and the member's into
-   `memberApiKey`. `agentUrl` defaults to `http://127.0.0.1:8200`.
+   `memberApiKey`. `agentUrl` defaults to `http://127.0.0.1:8201`.
 
 ## 4. Run the folders in order
 
@@ -88,7 +88,7 @@ they arrive: `run.started` → `tools.discovered` → `llm.request` → `llm.res
 tokens, latency). With curl:
 
 ```bash
-curl -N http://127.0.0.1:8200/v1/chat -H "Authorization: Bearer $KEY" \
+curl -N http://127.0.0.1:8201/v1/chat -H "Authorization: Bearer $KEY" \
   -H 'Content-Type: application/json' -d '{"message": "List 3 products"}'
 ```
 

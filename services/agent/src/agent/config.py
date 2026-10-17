@@ -43,7 +43,7 @@ class ServerSettings(BaseSettings):
     )
 
     host: str = "127.0.0.1"
-    port: int = Field(default=8200, ge=1, le=65535)
+    port: int = Field(default=8201, ge=1, le=65535)
     shutdown_grace_seconds: int = Field(
         default=30,
         ge=0,
