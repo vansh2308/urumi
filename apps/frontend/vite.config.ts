@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => {
   const agentTarget = env.AGENT_PROXY_TARGET || 'http://127.0.0.1:8201'
   return {
     plugins: [react(), tailwindcss()],
-    resolve: { alias: { '@': path.resolve(__dirname, './src') } },
+    resolve: { alias: { '@': path.resolve(import.meta.dirname, './src') } },
     server: {
       port: 5173,
       proxy: {

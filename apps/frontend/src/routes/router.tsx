@@ -55,8 +55,7 @@ export const router = createBrowserRouter([
             children: [
               { index: true, element: <Navigate to="/overview" replace /> },
               { path: "overview", element: page(<OverviewPage />) },
-              { path: "chat", element: page(<ChatPage />) },
-              { path: "chat/:conversationId", element: page(<ChatPage />) },
+              { path: "chat/:conversationId?", element: page(<ChatPage />) },
               { path: "mcp-servers", element: page(<McpServersPage />) },
               { path: "mcp-servers/:serverId", element: page(<McpServerDetailPage />) },
               { path: "tools", element: page(<ToolsPage />) },
