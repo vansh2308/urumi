@@ -140,7 +140,7 @@ class LlmSettings(BaseSettings):
     )
 
     provider: Literal["gemini"] = "gemini"
-    model: str = Field(default="gemini-2.5-flash", min_length=1, max_length=128)
+    model: str = Field(default="gemini-3.8-flash", min_length=1, max_length=128)
     request_timeout_seconds: float = Field(
         default=60.0, gt=0, description="Deadline for one model response, streaming included."
     )
