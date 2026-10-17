@@ -10,10 +10,15 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+import httpx
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from agent.config import Settings
 from agent.db.engine import Database, create_engine, create_session_factory
+from agent.gateway.client import GatewayClient, build_gateway_http_client
+from agent.llm.base import LlmProvider
+from agent.llm.factory import build_provider
+from agent.llm.gemini import build_llm_http_client
 from agent.metrics import Metrics
 
 logger = logging.getLogger(__name__)
@@ -23,20 +28,35 @@ logger = logging.getLogger(__name__)
 class Container:
     settings: Settings
     engine: AsyncEngine
+    gateway_http: httpx.AsyncClient
+    llm_http: httpx.AsyncClient
     db: Database
     metrics: Metrics
+    gateway: GatewayClient
+    llm: LlmProvider
 
     async def aclose(self) -> None:
         """Release pooled connections. Called once, after in-flight requests have drained."""
-        await self.engine.dispose()
+        try:
+            await self.gateway_http.aclose()
+            await self.llm_http.aclose()
+        finally:
+            await self.engine.dispose()
         logger.info("resources released")
 
 
 def build_container(settings: Settings) -> Container:
     engine = create_engine(settings.database, application_name=settings.app.service_name)
+    metrics = Metrics()
+    gateway_http = build_gateway_http_client(settings.gateway)
+    llm_http = build_llm_http_client(settings.llm)
     return Container(
         settings=settings,
         engine=engine,
+        gateway_http=gateway_http,
+        llm_http=llm_http,
         db=Database(create_session_factory(engine)),
-        metrics=Metrics(),
+        metrics=metrics,
+        gateway=GatewayClient(gateway_http, settings=settings.gateway, metrics=metrics),
+        llm=build_provider(settings, llm_http, metrics),
     )
