@@ -175,7 +175,7 @@ class GeminiProvider:
             return LlmUnavailableError("The model provider is temporarily unavailable.")
         if code == 504:
             return LlmTimeoutError("The model did not answer in time.")
-        if code in {401, 403}:
+        if code in {401, 403} or "API key" in message:
             return LlmRejectedError("The model provider rejected the service's credentials.")
         if code == 404:
             return LlmRejectedError("The configured model is not available.")

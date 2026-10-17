@@ -8,6 +8,7 @@ Routes
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncIterator
@@ -18,9 +19,9 @@ from starlette.middleware.cors import CORSMiddleware
 from agent import __version__
 from agent.api.errors import install_error_handlers
 from agent.api.middleware import BodySizeLimitMiddleware, RequestContextMiddleware
-from agent.api.routes import health
+from agent.api.routes import chat, conversations, health, tools, usage
 from agent.config import Settings
-from agent.container import build_container
+from agent.container import Container, build_container
 from agent.log import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            await _cancel_runs(container)
             await container.aclose()
             logger.info("stopped")
 
@@ -58,6 +60,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     install_error_handlers(app)
 
     app.include_router(health.router)
+    app.include_router(tools.router)
+    app.include_router(chat.router)
+    app.include_router(conversations.router)
+    app.include_router(usage.router)
 
     # The last middleware added is the outermost: request context wraps everything, so even
     # 413 and CORS responses carry a request id and are counted.
@@ -74,3 +80,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=settings.server.max_request_body_bytes)
     app.add_middleware(RequestContextMiddleware, metrics=container.metrics)
     return app
+
+
+async def _cancel_runs(container: Container) -> None:
+    """Streams still open after uvicorn's drain period: cancel their runs and give them a moment
+    to record ``cancelled`` and release their conversations before the pools close."""
+    tasks = list(container.run_tasks)
+    if not tasks:
+        return
+    for task in tasks:
+        task.cancel()
+    await asyncio.wait(tasks, timeout=5)
+    logger.info("cancelled in-flight runs", extra={"count": len(tasks)})

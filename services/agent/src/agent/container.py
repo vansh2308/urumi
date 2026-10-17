@@ -7,8 +7,9 @@ opens no connections.
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -43,6 +44,9 @@ class Container:
     tools: ToolDiscovery
     runner: AgentRunner
     usage: UsageService
+    # Streaming runs execute in their own tasks; held here so they are not garbage collected
+    # and can be cancelled on shutdown.
+    run_tasks: set[asyncio.Task[None]] = field(default_factory=set)
 
     async def aclose(self) -> None:
         """Release pooled connections. Called once, after in-flight requests have drained."""
