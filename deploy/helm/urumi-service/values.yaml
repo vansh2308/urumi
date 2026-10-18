@@ -1,0 +1,141 @@
+# Defaults for one service. Every value can be overridden per component by the umbrella chart.
+
+nameOverride: ""
+fullnameOverride: ""
+# app.kubernetes.io/component (e.g. backend, frontend)
+component: ""
+partOf: urumi
+
+image:
+  repository: ""
+  # Defaults to the chart appVersion. Prefer an immutable tag (git SHA) or set `digest`.
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+replicaCount: 1
+revisionHistoryLimit: 5
+# Zero-downtime rolling updates: a new pod must be Ready before an old one is removed.
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 0
+minReadySeconds: 0
+# Must exceed the service's own shutdown grace period (e.g. GATEWAY_SHUTDOWN_GRACE_SECONDS=25).
+terminationGracePeriodSeconds: 40
+
+command: []
+args: []
+containerPort: 8000
+service:
+  type: ClusterIP
+  port: 8000
+
+# Non-secret configuration, rendered into a ConfigMap and loaded with envFrom.
+env: {}
+# Secret values, referenced by name and key; the Secrets are created out of band and never
+# committed. Example: [{ name: DB_URL, secretName: gateway-secrets, key: DB_URL }]
+secretEnv: []
+
+probes:
+  liveness:
+    path: /health/live
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    path: /health/ready
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  startup:
+    path: /health/live
+    periodSeconds: 2
+    timeoutSeconds: 3
+    failureThreshold: 30
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+# Writable scratch space; the root filesystem is read-only.
+writableDirs:
+  - /tmp
+extraVolumes: []
+extraVolumeMounts: []
+
+# The services call no Kubernetes API, so the account gets no token and no RBAC.
+serviceAccount:
+  create: true
+  name: ""
+  automountToken: false
+  annotations: {}
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  #  - host: gateway.example.com
+  #    paths: [{ path: /, pathType: Prefix }]
+  tls: []
+
+networkPolicy:
+  enabled: false
+  # Raw NetworkPolicyIngressRule entries; the container port is added when `ports` is omitted.
+  ingress: []
+  # Raw NetworkPolicyEgressRule entries. Empty = egress unrestricted (no Egress policy type).
+  egress: []
+
+# Database migrations as a Helm pre-install/pre-upgrade hook, with the same image. It gets only
+# `migration.env` and the `secretEnv` entries named in `secretNames` (least privilege; the release
+# ConfigMap does not exist yet when it runs).
+migration:
+  enabled: false
+  command: ["alembic", "upgrade", "head"]
+  env: {}
+  secretNames: [DB_URL]
+  backoffLimit: 1
+  activeDeadlineSeconds: 300
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+# Map host names to the ClusterIP of an existing Service, looked up at install time. Used when
+# an upstream must be addressed by a name that only exists outside the cluster (e.g. a local
+# store whose canonical URL is http://wordpress.local and is part of its OAuth signature).
+#  - { hostnames: [wordpress.local], service: store-wordpress }   # optional: namespace, ip
+hostAliasesFromServices: []
+hostAliases: []
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
