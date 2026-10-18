@@ -166,4 +166,20 @@ poetry run ruff check .
 poetry run mypy
 ```
 
-Automated tests and the container image are intentionally not part of this first iteration.
+## Tests
+
+The suite never touches the real store or the real database. WooCommerce is an in-process fake
+(`httpx.MockTransport`), and PostgreSQL tests create a throwaway database on a local server named
+by `TEST_DATABASE_URL`, migrate it, and drop it afterwards. They are skipped when the variable is
+unset and refuse any host other than `localhost`/`127.0.0.1`.
+
+```bash
+docker run -d --rm --name urumi-test-postgres -e POSTGRES_PASSWORD=postgres \
+  -p 127.0.0.1:55432:5432 --tmpfs /var/lib/postgresql/data postgres:16-alpine
+TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55432/postgres poetry run pytest
+```
+
+What is covered: OAuth 1.0a signing against a transcription of WooCommerce's verifier, the retry
+policy (reads retried, ambiguous creates never re-sent), error mapping, idempotent writes and
+their concurrency on PostgreSQL, and the ASGI app end to end over Streamable HTTP with the
+official MCP client (tools, structured results, safe tool errors, probes, Host-header checks).
