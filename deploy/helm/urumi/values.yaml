@@ -1,0 +1,197 @@
+# Environment-neutral defaults for the Urumi services. Layer an environment file on top:
+#   values-local.yaml       k3d cluster on a laptop (urumi-local)
+#   values-production.yaml  single-node k3s on a VPS (template; fill in hosts and secrets)
+#
+# Names are pinned with fullnameOverride so in-cluster DNS is stable:
+#   woocommerce-mcp.<ns>.svc.cluster.local:8000   (private: only the gateway may connect)
+#   gateway.<ns>.svc.cluster.local:8100
+#   agent.<ns>.svc.cluster.local:8201
+#   frontend.<ns>.svc.cluster.local:8080
+#
+# Secrets are never stored here. Each service reads its credentials from a Secret created out of
+# band (deploy/scripts/create-local-secrets.sh locally, your secret manager in production):
+#   woocommerce-mcp-secrets: WC_CONSUMER_KEY, WC_CONSUMER_SECRET, DB_URL
+#   gateway-secrets:         DB_URL, AUTH_TOKEN_PEPPER
+#   agent-secrets:           DB_URL, GEMINI_API_KEY
+
+global:
+  # One immutable tag (e.g. the git SHA) for every image; a component's image.tag overrides it.
+  imageTag: ""
+
+# --- WooCommerce MCP server ----------------------------------------------------------------------
+woocommerce-mcp:
+  enabled: true
+  nameOverride: woocommerce-mcp
+  fullnameOverride: woocommerce-mcp
+  component: mcp-server
+  image:
+    repository: urumi/woocommerce-mcp
+  containerPort: 8000
+  service:
+    port: 8000
+  terminationGracePeriodSeconds: 35
+  env:
+    LOG_FORMAT: json
+    LOG_LEVEL: INFO
+    MCP_HOST: 0.0.0.0
+    MCP_PORT: "8000"
+    MCP_SHUTDOWN_GRACE_SECONDS: "25"
+    # DNS-rebinding protection: the Host headers the gateway (and port-forwards) send.
+    MCP_ALLOWED_HOSTS: >-
+      woocommerce-mcp:*,woocommerce-mcp.urumi:*,woocommerce-mcp.urumi.svc:*,woocommerce-mcp.urumi.svc.cluster.local:*,localhost:*,127.0.0.1:*
+    # An upstream store outage must not pull every replica out of the Service.
+    MCP_READINESS_CHECKS_WOOCOMMERCE: "false"
+    WC_IP_FAMILY: auto
+    # WC_BASE_URL and WC_ALLOW_INSECURE_HTTP are per environment.
+  secretEnv:
+    - { name: WC_CONSUMER_KEY, secretName: woocommerce-mcp-secrets }
+    - { name: WC_CONSUMER_SECRET, secretName: woocommerce-mcp-secrets }
+    - { name: DB_URL, secretName: woocommerce-mcp-secrets }
+  probes:
+    liveness: { path: /healthz }
+    readiness: { path: /readyz }
+    startup: { path: /healthz, periodSeconds: 2, failureThreshold: 30 }
+  migration:
+    enabled: true
+  networkPolicy:
+    enabled: true
+    # The MCP server does no client authentication of its own: only gateway pods may reach it.
+    ingress:
+      - from:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/name: gateway
+
+# --- Gateway --------------------------------------------------------------------------------------
+gateway:
+  enabled: true
+  nameOverride: gateway
+  fullnameOverride: gateway
+  component: gateway
+  image:
+    repository: urumi/gateway
+  containerPort: 8100
+  service:
+    port: 8100
+  env:
+    LOG_FORMAT: json
+    LOG_LEVEL: INFO
+    GATEWAY_HOST: 0.0.0.0
+    GATEWAY_PORT: "8100"
+    GATEWAY_SHUTDOWN_GRACE_SECONDS: "25"
+    # Connector URLs must match (SSRF guard). Plain HTTP is fine inside the cluster network.
+    UPSTREAM_ALLOWED_HOSTS: woocommerce-mcp.urumi.svc.cluster.local:8000
+    UPSTREAM_ALLOW_INSECURE_HTTP: "true"
+    UPSTREAM_IP_FAMILY: auto
+  secretEnv:
+    - { name: DB_URL, secretName: gateway-secrets }
+    - { name: AUTH_TOKEN_PEPPER, secretName: gateway-secrets }
+  migration:
+    enabled: true
+  networkPolicy:
+    enabled: true
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: kube-system
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/name: traefik
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/name: frontend
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/name: agent
+
+# --- Agent ----------------------------------------------------------------------------------------
+agent:
+  enabled: true
+  nameOverride: agent
+  fullnameOverride: agent
+  component: agent
+  image:
+    repository: urumi/agent
+  containerPort: 8201
+  service:
+    port: 8201
+  # Streaming runs may take up to RUN_TIMEOUT_SECONDS; give them time to finish on shutdown.
+  terminationGracePeriodSeconds: 45
+  env:
+    LOG_FORMAT: json
+    LOG_LEVEL: INFO
+    AGENT_HOST: 0.0.0.0
+    AGENT_PORT: "8201"
+    AGENT_SHUTDOWN_GRACE_SECONDS: "30"
+    # Tools are discovered and invoked only through the gateway, with the caller's own key.
+    GATEWAY_URL: http://gateway.urumi.svc.cluster.local:8100
+    LLM_PROVIDER: gemini
+    LLM_MODEL: gemini-3.8-flash
+  secretEnv:
+    - { name: DB_URL, secretName: agent-secrets }
+    - { name: GEMINI_API_KEY, secretName: agent-secrets }
+  migration:
+    enabled: true
+  networkPolicy:
+    enabled: true
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: kube-system
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/name: traefik
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/name: frontend
+
+# --- Dashboard ------------------------------------------------------------------------------------
+frontend:
+  enabled: true
+  nameOverride: frontend
+  fullnameOverride: frontend
+  component: frontend
+  image:
+    repository: urumi/frontend
+  containerPort: 8080
+  service:
+    port: 8080
+  terminationGracePeriodSeconds: 15
+  env:
+    # nginx resolves these per request (fully qualified: nginx ignores DNS search domains).
+    GATEWAY_UPSTREAM: http://gateway.urumi.svc.cluster.local:8100
+    AGENT_UPSTREAM: http://agent.urumi.svc.cluster.local:8201
+  probes:
+    liveness: { path: /healthz }
+    readiness: { path: /healthz }
+    startup: { path: /healthz, periodSeconds: 2, failureThreshold: 15 }
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    runAsGroup: 101
+    fsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
+  # nginx writes its rendered config, pid file and proxy buffers; the image is read-only.
+  writableDirs:
+    - /tmp
+    - /var/cache/nginx
+    - /etc/nginx/conf.d
+  resources:
+    requests:
+      cpu: 20m
+      memory: 32Mi
+    limits:
+      memory: 128Mi
+  networkPolicy:
+    enabled: true
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: kube-system
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/name: traefik
