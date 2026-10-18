@@ -42,7 +42,7 @@ class WooCommerceSettings(BaseSettings):
     base_url: str = Field(
         description=(
             "Store root URL exactly as configured in WordPress 'home' "
-            "(e.g. http://wordpress.local:8080). OAuth1 signatures are computed against it."
+            "(e.g. http://wordpress.local). OAuth1 signatures are computed against it."
         )
     )
     consumer_key: SecretStr

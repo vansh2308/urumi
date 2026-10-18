@@ -1,0 +1,36 @@
+# Copy to values-local.secret.yaml (gitignored) and fill in the passwords.
+# wordpressHost has no port: the cluster publishes the ingress on host port 80.
+wordpressHost: "wordpress.local"
+wordpressScheme: http
+
+wordpressUsername: admin
+wordpressPassword: "change-me"
+wordpressEmail: "admin@example.com"
+wordpressBlogName: "Urumi Demo Store"
+
+service:
+  type: ClusterIP
+
+ingress:
+  enabled: true
+  hostname: wordpress.local
+
+httpRoute:
+  hostnames:
+    - 'wordpress.local'
+
+persistence:
+  enabled: true
+  size: 2Gi
+
+mariadb:
+  enabled: true
+  auth:
+    rootPassword: "change-me"
+    username: bn_wordpress
+    password: "change-me"
+    database: bitnami_wordpress
+  primary:
+    persistence:
+      enabled: true
+      size: 2Gi

@@ -140,7 +140,7 @@ On macOS, keep `WC_IP_FAMILY=ipv4` for `*.local` store names: the system resolve
 and surface as `upstream_unavailable`.
 
 Generate the key under *WooCommerce → Settings → Advanced → REST API* for the local store at
-`http://wordpress.local:8080`. Try the tools with the MCP Inspector
+`http://wordpress.local`. Try the tools with the MCP Inspector
 (`npx @modelcontextprotocol/inspector`, transport *Streamable HTTP*, URL
 `http://127.0.0.1:8000/mcp`).
 

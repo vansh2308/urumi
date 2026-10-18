@@ -7,7 +7,7 @@ tokens, ids and keys into collection variables, so you never copy them by hand.
 ## 1. Start everything
 
 ```bash
-# terminal 1: the WooCommerce MCP server (store must be up at http://wordpress.local:8080)
+# terminal 1: the WooCommerce MCP server (store must be up at http://wordpress.local)
 cd services/woocommerce-mcp && poetry run woocommerce-mcp        # http://127.0.0.1:8000/mcp
 
 # terminal 2: the gateway

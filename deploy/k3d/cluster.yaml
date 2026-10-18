@@ -1,0 +1,19 @@
+# Local k3d cluster for the WooCommerce store.
+#   k3d cluster create --config deploy/k3d/cluster.yaml
+#
+# Host 80/443 go straight to the k3d load balancer, which forwards to Traefik (the
+# k3s ingress controller). The store answers at http://wordpress.local with no
+# port, matching its WordPress home/siteurl, so no host-side port forwarder is needed.
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata:
+  name: urumi-local
+servers: 1
+agents: 1
+ports:
+  - port: 80:80
+    nodeFilters:
+      - loadbalancer
+  - port: 443:443
+    nodeFilters:
+      - loadbalancer
