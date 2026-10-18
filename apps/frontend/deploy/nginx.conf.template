@@ -1,0 +1,72 @@
+# Rendered by the nginx image's entrypoint (envsubst) into /etc/nginx/conf.d/default.conf.
+resolver ${NGINX_LOCAL_RESOLVERS} valid=30s ipv6=off;
+
+# Keep a caller's request id so logs join across services; otherwise use nginx's own.
+map $http_x_request_id $req_id {
+    default $http_x_request_id;
+    ""      $request_id;
+}
+
+server {
+    listen 8080;
+    server_name _;
+    server_tokens off;
+    root /usr/share/nginx/html;
+    client_max_body_size 1m;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    # Same-origin API proxies; the prefix is stripped exactly like the Vite dev proxy.
+    location /api/gateway/ {
+        set $gateway_upstream "${GATEWAY_UPSTREAM}";
+        rewrite ^/api/gateway/(.*)$ /$1 break;
+        proxy_pass $gateway_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $proxy_host;
+        proxy_set_header X-Request-ID $req_id;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 130s;
+    }
+
+    location /api/agent/ {
+        set $agent_upstream "${AGENT_UPSTREAM}";
+        rewrite ^/api/agent/(.*)$ /$1 break;
+        proxy_pass $agent_upstream;
+        proxy_http_version 1.1;
+        proxy_set_header Host $proxy_host;
+        proxy_set_header Connection "";
+        proxy_set_header X-Request-ID $req_id;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Chat answers stream as server-sent events: never buffer, allow long runs.
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;
+    }
+
+    # Hashed build assets never change.
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        try_files $uri =404;
+    }
+
+    # Client-side routes fall back to the app shell, which is never cached.
+    location / {
+        add_header Cache-Control "no-cache" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "no-referrer" always;
+        try_files $uri /index.html;
+    }
+}

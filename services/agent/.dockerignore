@@ -1,0 +1,10 @@
+# Only pyproject.toml, poetry.lock, README.md, src/, alembic.ini and alembic/ are needed.
+**
+!pyproject.toml
+!poetry.lock
+!README.md
+!src/
+!alembic.ini
+!alembic/
+**/__pycache__
+**/*.py[cod]

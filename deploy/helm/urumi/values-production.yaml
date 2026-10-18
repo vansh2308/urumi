@@ -1,0 +1,79 @@
+# Production template: single-node k3s (or any cluster) on a VPS. Copy, fill in the hosts, push
+# images to a registry, create the three Secrets with real values, then:
+#   helm upgrade --install urumi deploy/helm/urumi -n urumi \
+#     -f deploy/helm/urumi/values.yaml -f values-production.yaml \
+#     --set global.imageTag=<git-sha> --wait --timeout 10m
+# Use cert-manager (or your provider) for TLS; the Secrets named in `tls` are created by it.
+
+x-replicated: &replicated
+  replicaCount: 2
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+  topologySpreadConstraints: []
+
+woocommerce-mcp:
+  <<: *replicated
+  image:
+    repository: registry.example.com/urumi/woocommerce-mcp
+    pullPolicy: IfNotPresent
+  env:
+    APP_ENV: production
+    # A real store over HTTPS (HTTP Basic with the consumer key/secret). Plain HTTP is refused
+    # in production.
+    WC_BASE_URL: https://shop.example.com
+    WC_ALLOW_INSECURE_HTTP: "false"
+  resources:
+    requests: { cpu: 100m, memory: 160Mi }
+    limits: { memory: 384Mi }
+
+gateway:
+  <<: *replicated
+  image:
+    repository: registry.example.com/urumi/gateway
+  env:
+    APP_ENV: production
+    GATEWAY_DOCS_ENABLED: "false"
+    # The ingress controller's pod CIDR (k3s default shown).
+    GATEWAY_FORWARDED_ALLOW_IPS: 10.42.0.0/16
+  resources:
+    requests: { cpu: 100m, memory: 192Mi }
+    limits: { memory: 512Mi }
+  ingress:
+    enabled: true
+    className: traefik
+    hosts:
+      - host: gateway.example.com
+        paths: [{ path: /, pathType: Prefix }]
+    tls:
+      - secretName: gateway-tls
+        hosts: [gateway.example.com]
+
+agent:
+  <<: *replicated
+  image:
+    repository: registry.example.com/urumi/agent
+  env:
+    APP_ENV: production
+    AGENT_DOCS_ENABLED: "false"
+    AGENT_FORWARDED_ALLOW_IPS: 10.42.0.0/16
+  resources:
+    requests: { cpu: 100m, memory: 192Mi }
+    limits: { memory: 512Mi }
+  # The dashboard reaches the agent through its own proxy; expose it only if API clients need it.
+  ingress:
+    enabled: false
+
+frontend:
+  <<: *replicated
+  image:
+    repository: registry.example.com/urumi/frontend
+  ingress:
+    enabled: true
+    className: traefik
+    hosts:
+      - host: app.example.com
+        paths: [{ path: /, pathType: Prefix }]
+    tls:
+      - secretName: app-tls
+        hosts: [app.example.com]

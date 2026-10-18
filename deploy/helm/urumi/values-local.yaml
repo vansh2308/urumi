@@ -1,0 +1,50 @@
+# Local k3d cluster (urumi-local, namespace urumi). Images are built locally and imported with
+# `k3d image import`; deploy/scripts/deploy-local.sh does both and sets image tags to the commit.
+#
+# Hosts (add to /etc/hosts -> 127.0.0.1; the cluster publishes the ingress on host port 80):
+#   urumi.local          dashboard (proxies /api/gateway and /api/agent)
+#   gateway.urumi.local  gateway REST + MCP endpoint, for Postman and MCP clients
+#   agent.urumi.local    agent API, for Postman
+
+woocommerce-mcp:
+  env:
+    APP_ENV: local
+    # Must equal the WordPress home URL: OAuth 1.0a signatures are computed over it. Inside the
+    # cluster the name is pinned to the store Service (hostAliasesFromServices below), so the
+    # pod talks to WordPress directly, not through localhost or the ingress.
+    WC_BASE_URL: http://wordpress.local
+    WC_ALLOW_INSECURE_HTTP: "true"
+  hostAliasesFromServices:
+    - hostnames: [wordpress.local]
+      service: store-wordpress
+
+gateway:
+  env:
+    APP_ENV: local
+    # Trust X-Forwarded-For only from pods (Traefik, the dashboard's nginx): k3s pod CIDR.
+    GATEWAY_FORWARDED_ALLOW_IPS: 10.42.0.0/16
+  ingress:
+    enabled: true
+    className: traefik
+    hosts:
+      - host: gateway.urumi.local
+        paths: [{ path: /, pathType: Prefix }]
+
+agent:
+  env:
+    APP_ENV: local
+    AGENT_FORWARDED_ALLOW_IPS: 10.42.0.0/16
+  ingress:
+    enabled: true
+    className: traefik
+    hosts:
+      - host: agent.urumi.local
+        paths: [{ path: /, pathType: Prefix }]
+
+frontend:
+  ingress:
+    enabled: true
+    className: traefik
+    hosts:
+      - host: urumi.local
+        paths: [{ path: /, pathType: Prefix }]

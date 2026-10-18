@@ -22,6 +22,10 @@ httpRoute:
 persistence:
   enabled: true
   size: 2Gi
+  # Keep the WordPress volume if the release is ever uninstalled (the MariaDB volume comes from a
+  # StatefulSet template and is never deleted by Helm).
+  annotations:
+    helm.sh/resource-policy: keep
 
 mariadb:
   enabled: true

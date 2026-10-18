@@ -1,0 +1,9 @@
+apiVersion: v2
+name: urumi-service
+description: >-
+  Reusable chart for one stateless first-party Urumi service: Deployment, Service, ConfigMap,
+  Secret references, probes, Ingress, NetworkPolicy, PodDisruptionBudget, ServiceAccount and an
+  optional database migration hook Job.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

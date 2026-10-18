@@ -344,3 +344,6 @@ pyrightconfig.json
 
 
 deploy/helm/woocommerce/values-local.secret.yaml
+# Helm: vendored copies of local dependency charts (rebuilt by `helm dependency build`)
+deploy/helm/urumi/charts/
+deploy/helm/urumi/Chart.lock

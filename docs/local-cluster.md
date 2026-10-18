@@ -13,14 +13,19 @@ controller. The host publishes the standard HTTP/HTTPS ports directly, so the st
 | `8080`, `8443` | `80`, `443` | Legacy aliases on the existing cluster; WordPress redirects them to port 80 |
 | random (`k3d cluster list`) | `6443` | Kubernetes API (`kubectl` context `k3d-urumi-local`) |
 
-Services on the host:
+The platform services run either in the cluster (Helm release `urumi`, see
+[deployment.md](deployment.md)) or on the host for development:
 
-| Service | URL |
-| --- | --- |
-| WooCommerce MCP | `http://127.0.0.1:8000/mcp` (talks to the store at `WC_BASE_URL=http://wordpress.local`) |
-| Gateway | `http://127.0.0.1:8100` (connector `woocommerce` → `http://127.0.0.1:8000/mcp`) |
-| Agent | `http://127.0.0.1:8201` |
-| Dashboard | `http://127.0.0.1:5173` |
+| Service | In the cluster | On the host |
+| --- | --- | --- |
+| WooCommerce MCP | `woocommerce-mcp.urumi.svc.cluster.local:8000` (private) | `http://127.0.0.1:8000/mcp` |
+| Gateway | `http://gateway.urumi.local` | `http://127.0.0.1:8100` |
+| Agent | `http://agent.urumi.local` | `http://127.0.0.1:8201` |
+| Dashboard | `http://urumi.local` | `http://127.0.0.1:5173` |
+
+Both talk to the store at `WC_BASE_URL=http://wordpress.local`. The gateway's connector URL
+decides which MCP server it calls: `http://127.0.0.1:8000/mcp` on the host,
+`http://woocommerce-mcp.urumi.svc.cluster.local:8000/mcp` in the cluster.
 
 WordPress's canonical URL is `http://wordpress.local`: it is set as `WP_HOME`/`WP_SITEURL` in
 `wp-config.php` and as `home`/`siteurl` in the database, and `wordpressHost` in the Helm values
@@ -55,6 +60,12 @@ k3d cluster edit urumi-local --port-add 80:80@loadbalancer --port-add 443:443@lo
 ```bash
 k3d cluster start urumi-local
 kubectl -n urumi rollout status deploy/store-wordpress
+kubectl -n urumi rollout status deploy/gateway            # if the urumi release is installed
+```
+
+For host development instead:
+
+```bash
 cd services/woocommerce-mcp && poetry run woocommerce-mcp   # terminal 1
 cd services/gateway && poetry run gateway                   # terminal 2
 cd services/agent && poetry run agent                       # terminal 3
