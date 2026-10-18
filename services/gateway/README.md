@@ -188,4 +188,21 @@ poetry run ruff check .
 poetry run mypy
 ```
 
-Automated tests and the container image are intentionally not part of this iteration.
+## Tests
+
+The suite never touches the real database or a real MCP server. PostgreSQL tests create a
+throwaway database on a local server named by `TEST_DATABASE_URL`, migrate it and drop it
+afterwards (they are skipped when it is unset and refuse non-local hosts); the upstream is a small
+FastMCP server the tests start on a free localhost port.
+
+```bash
+docker run -d --rm --name urumi-test-postgres -e POSTGRES_PASSWORD=postgres \
+  -p 127.0.0.1:55432:5432 --tmpfs /var/lib/postgresql/data postgres:16-alpine
+TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55432/postgres poetry run pytest
+```
+
+What is covered: token hashing and the SSRF allow-list; registration, login and sessions; team
+RBAC, cross-team isolation (404, not 403) and payload smuggling; API keys (shown once, stored as a
+hash, scopes, tool restrictions, revocation, rotation, ownership); connector registration rules;
+tool discovery and invocation over REST and the MCP endpoint; upstream failures; usage and audit
+visibility.
