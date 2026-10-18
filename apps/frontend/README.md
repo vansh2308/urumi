@@ -55,3 +55,11 @@ src/
   pages/           one file per route
   routes/          router and guards
 ```
+
+## Tests
+
+```bash
+npm test   # vitest: API client errors, the agent event-stream parser and chat history mapping
+```
+
+They run in Node with `fetch` stubbed, so no service needs to be running.
