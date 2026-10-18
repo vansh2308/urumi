@@ -186,4 +186,22 @@ poetry run ruff check .
 poetry run mypy
 ```
 
-Automated tests and the container image are intentionally not part of this iteration.
+## Tests
+
+The suite never reaches the real database, gateway or model provider. PostgreSQL tests create a
+throwaway database on a local server named by `TEST_DATABASE_URL`, migrate it and drop it
+afterwards (skipped when it is unset; non-local hosts are refused). The gateway is an in-process
+fake that enforces per-key tool access, and the model is a scripted provider behind the same
+`LlmProvider` interface as Gemini.
+
+```bash
+docker run -d --rm --name urumi-test-postgres -e POSTGRES_PASSWORD=postgres \
+  -p 127.0.0.1:55432:5432 --tmpfs /var/lib/postgresql/data postgres:16-alpine
+TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55432/postgres poetry run pytest
+```
+
+What is covered: the tool-calling loop through the gateway with persistence and run metrics,
+multi-turn context, argument validation and unknown tools (never forwarded), permission denial,
+upstream and malformed results (never reported as success), step limits, provider failures, SSE
+event order, conversation ownership, request refusal before a run starts, and the Gemini wire
+format (request translation, streaming, tool-call parsing, retries, safe errors).
