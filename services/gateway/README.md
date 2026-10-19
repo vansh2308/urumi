@@ -89,9 +89,16 @@ Two ways to call tools, with identical checks, auditing and usage tracking:
 
 * **REST**: `POST /v1/teams/{team_id}/connectors/{slug}/tools/{tool}/call` with
   `{"arguments": {...}}` returns the MCP `CallToolResult`.
-* **MCP**: `/v1/mcp/{slug}` is a stateless Streamable HTTP MCP server for MCP clients
-  (Inspector, Claude, agents). The API key selects the team; `tools/list` shows only permitted
-  tools.
+* **MCP, all servers**: `/v1/mcp` is one stateless Streamable HTTP MCP server for MCP clients
+  (Inspector, Claude Code, Cursor, agents). The API key selects the team; `tools/list` returns
+  the permitted tools of **every** enabled server, fetched in parallel. Tools are named
+  `<server>__<tool>` (slugs cannot contain `_`, so the first `__` always splits them), which
+  keeps equal tool names on different servers apart, and each description starts with
+  `[Server name]`. A server that fails or takes longer than
+  `UPSTREAM_AGGREGATE_LIST_TIMEOUT_SECONDS` (10 s) is left out of that listing, logged and
+  metered, so one dead upstream never breaks the list. `GET /v1/teams/{team_id}/tools` returns
+  the same listing over REST plus the `unavailable` servers.
+* **MCP, one server**: `/v1/mcp/{slug}` exposes one server with its original tool names.
 
 ## API
 
@@ -110,7 +117,7 @@ OpenAPI docs are served at `/docs` (`GATEWAY_DOCS_ENABLED`). Errors are always
 | Hosted servers | `GET /v1/hosted-servers/settings`, `POST/GET /v1/hosted-servers`, `GET/PATCH /v1/hosted-servers/{id}`, `POST …/{id}/restart` |
 | Team connectors | `GET /v1/teams/{team_id}/connectors`, `PUT/DELETE …/connectors/{slug}`, `GET …/connectors/{slug}/catalog` |
 | Grants | `GET /v1/teams/{team_id}/members/{user_id}/grants`, `PUT/DELETE …/grants/{slug}` |
-| Tools | `GET /v1/teams/{team_id}/connectors/{slug}/tools`, `POST …/tools/{tool}/call`, `/v1/mcp/{slug}` |
+| Tools | `GET /v1/teams/{team_id}/tools`, `GET /v1/teams/{team_id}/connectors/{slug}/tools`, `POST …/tools/{tool}/call`, `/v1/mcp`, `/v1/mcp/{slug}` |
 | Audit & usage | `GET /v1/teams/{team_id}/audit-events`, `GET /v1/audit-events`, `GET /v1/teams/{team_id}/usage/invocations`, `GET /v1/teams/{team_id}/usage/summary` |
 
 ## Reliability and observability
