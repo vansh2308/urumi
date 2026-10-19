@@ -39,6 +39,7 @@ from gateway.config import (
     AppSettings,
     AuthSettings,
     DatabaseSettings,
+    OAuthSettings,
     RateLimitSettings,
     RetentionSettings,
     ServerSettings,
@@ -200,6 +201,14 @@ def make_settings(dsn: str) -> Settings:
             credential_keys=[Fernet.generate_key().decode()],
         ),
         retention=RetentionSettings(_env_file=None, purge_interval_seconds=0),
+        oauth=OAuthSettings(
+            _env_file=None,
+            enabled=True,
+            issuer_url=BASE_URL,
+            consent_url="http://app.test/oauth/consent",
+            allow_http_issuer=True,
+            requests_per_minute=1000,
+        ),
     )
 
 

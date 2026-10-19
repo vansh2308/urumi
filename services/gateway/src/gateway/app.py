@@ -24,11 +24,21 @@ from gateway.api.deps import API_PREFIX
 from gateway.api.errors import install_error_handlers
 from gateway.api.mcp_proxy import McpProxy
 from gateway.api.middleware import BodySizeLimitMiddleware, RequestContextMiddleware
-from gateway.api.routes import activity, api_keys, auth, connectors, health, hosted, teams
+from gateway.api.routes import (
+    activity,
+    api_keys,
+    auth,
+    connectors,
+    health,
+    hosted,
+    oauth,
+    teams,
+)
 from gateway.config import Settings
 from gateway.container import Container, build_container
 from gateway.errors import AppError
 from gateway.log import configure_logging
+from gateway.oauth.routes import build_oauth_routes
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +91,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(connectors.team)
     app.include_router(hosted.router)
     app.include_router(activity.router)
+    if container.oauth is not None:
+        app.router.routes.extend(
+            build_oauth_routes(container.oauth, settings.oauth, container.rate_limiter)
+        )
+    app.include_router(oauth.router)
     app.router.routes.append(
         Route(f"{API_PREFIX}/mcp", mcp_proxy, methods=["GET", "POST", "DELETE"])
     )

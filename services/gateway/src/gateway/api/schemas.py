@@ -196,10 +196,57 @@ class ApiKeyOut(BaseModel):
     session_bound: bool = Field(
         default=False, description="A dashboard key that ends with the login session."
     )
+    oauth_issued: bool = Field(
+        default=False, description="An OAuth access token for a connected app (short-lived)."
+    )
 
 
 class IssuedApiKeyOut(ApiKeyOut):
     key: str = Field(description="The urk_ secret. Shown once; it cannot be retrieved later.")
+
+
+# --- oauth --------------------------------------------------------------------------------------
+
+
+class OAuthConfigOut(BaseModel):
+    enabled: bool
+    issuer: str | None = None
+    mcp_url: str | None = Field(
+        default=None, description="The MCP endpoint OAuth clients connect to."
+    )
+
+
+class ConsentRequestOut(BaseModel):
+    client_id: str
+    client_name: str | None = Field(description="Self-declared by the client; not verified.")
+    client_uri: str | None
+    redirect_host: str = Field(description="Where the browser goes back to after approval.")
+    scopes: list[str]
+    expires_at: datetime
+
+
+class ConsentDecisionRequest(RequestModel):
+    approve: bool
+    team_id: uuid.UUID | None = Field(
+        default=None, description="Required to approve: the team the app acts in."
+    )
+
+
+class ConsentDecisionOut(BaseModel):
+    redirect_to: str
+
+
+class OAuthGrantOut(BaseModel):
+    id: uuid.UUID
+    client_name: str | None
+    team_id: uuid.UUID
+    team_name: str
+    scopes: list[str]
+    created_at: datetime
+    last_refreshed_at: datetime | None
+    access_key_prefix: str | None = Field(
+        default=None, description="Prefix of the current access token (an API key)."
+    )
 
 
 # --- connectors ---------------------------------------------------------------------------------

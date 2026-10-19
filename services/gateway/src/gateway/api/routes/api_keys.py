@@ -35,6 +35,7 @@ def _out(key: ApiKey) -> ApiKeyOut:
         revoked_at=key.revoked_at,
         rotated_from_id=key.rotated_from_id,
         session_bound=key.session_id is not None,
+        oauth_issued=key.oauth_grant_id is not None,
     )
 
 
