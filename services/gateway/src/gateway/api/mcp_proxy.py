@@ -1,8 +1,14 @@
-"""MCP endpoint of the gateway: ``/v1/mcp/{connector}`` speaks MCP Streamable HTTP.
+"""MCP endpoints of the gateway, speaking MCP Streamable HTTP:
 
-MCP clients (Claude, the MCP Inspector, agents) connect here with a platform API key as
-``Authorization: Bearer urk_...``. The key fixes the team; the path names the connector. The
-endpoint exposes exactly the tools the key may use and forwards calls through the same
+* ``/v1/mcp``: every enabled server at once. Tools are named ``<connector>__<tool>`` (slugs
+  cannot contain ``_``, so the first ``__`` always splits them), so two servers may expose tools
+  with the same name. Listing fetches all servers in parallel; one that is slow or down is left
+  out of that listing rather than failing it.
+* ``/v1/mcp/{connector}``: one server, with its original tool names.
+
+MCP clients (Claude, the MCP Inspector, agents) connect with a platform API key as
+``Authorization: Bearer urk_...``. The key fixes the team. Both endpoints expose exactly the
+tools the key may use and forwards calls through the same
 :class:`~gateway.services.tools.ToolService` as the REST API, so authorization, auditing and
 usage tracking are identical on both paths.
 
@@ -30,23 +36,30 @@ from gateway.api.errors import error_body
 from gateway.container import Container
 from gateway.errors import AppError, AuthenticationError, PermissionDeniedError, RateLimitedError
 from gateway.services.principal import CredentialKind, Principal
-from gateway.services.tools import CallContext, Transport
+from gateway.services.teams import TeamContext
+from gateway.services.tools import (
+    CallContext,
+    Transport,
+    qualified_name,
+    split_qualified_name,
+)
 
 logger = logging.getLogger(__name__)
 
 _STATE_KEY = "gateway_mcp"
 
 INSTRUCTIONS = """\
-Tools of one MCP server, exposed through the Urumi gateway. Only tools your API key is allowed
-to use are listed. Errors are returned as '<code>: <message>'; codes marked '(retryable)' may
-succeed if retried later."""
+Tools of the MCP servers your team uses, exposed through the Urumi gateway. Only tools your API
+key is allowed to use are listed. On the all-servers endpoint a tool is named
+'<server>__<tool>' and its description starts with the server's name. Errors are returned as
+'<code>: <message>'; codes marked '(retryable)' may succeed if retried later."""
 
 
 @dataclass(frozen=True, slots=True)
 class _ProxyRequest:
     principal: Principal
     team_id: uuid.UUID
-    connector_slug: str
+    connector_slug: str | None  # None: the all-servers endpoint
 
 
 class McpProxy:
@@ -69,7 +82,7 @@ class McpProxy:
         )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        slug = str(scope.get("path_params", {}).get("connector", ""))
+        slug = scope.get("path_params", {}).get("connector")
         try:
             principal = await self._authenticate(Headers(scope=scope))
         except AppError as exc:
@@ -77,7 +90,9 @@ class McpProxy:
             return
         assert principal.api_key_team_id is not None  # guaranteed for API keys  # noqa: S101
         scope.setdefault("state", {})[_STATE_KEY] = _ProxyRequest(
-            principal=principal, team_id=principal.api_key_team_id, connector_slug=slug
+            principal=principal,
+            team_id=principal.api_key_team_id,
+            connector_slug=str(slug) if slug is not None else None,
         )
         await self.session_manager.handle_request(scope, receive, send)
 
@@ -108,22 +123,59 @@ class McpProxy:
         req = self._current()
         try:
             ctx = await self._container.teams.context(req.principal, req.team_id)
-            tools = await self._container.tools.list_tools(ctx, req.connector_slug)
+            if req.connector_slug is None:
+                tools = await self._aggregated_tools(ctx)
+            else:
+                tools = await self._container.tools.list_tools(ctx, req.connector_slug)
         except AppError as exc:
             raise McpError(
                 mcp_types.ErrorData(code=mcp_types.INVALID_REQUEST, message=_message(exc))
             ) from exc
         return mcp_types.ServerResult(mcp_types.ListToolsResult(tools=tools))
 
+    async def _aggregated_tools(self, ctx: TeamContext) -> list[mcp_types.Tool]:
+        listing = await self._container.tools.list_all_tools(ctx)
+        if listing.unavailable:
+            logger.warning(
+                "servers left out of the aggregated tool list",
+                extra={"unavailable": [f"{slug}:{code}" for slug, code in listing.unavailable]},
+            )
+        return [
+            tool.model_copy(
+                update={
+                    "name": qualified_name(server.slug, tool.name),
+                    "description": f"[{server.display_name}] {tool.description or ''}".strip(),
+                }
+            )
+            for server in listing.servers
+            for tool in server.tools
+        ]
+
     async def _call_tool(self, request: mcp_types.CallToolRequest) -> mcp_types.ServerResult:
         req = self._current()
+        slug, tool = req.connector_slug, request.params.name
+        if slug is None:
+            parts = split_qualified_name(tool)
+            if parts is None:
+                return mcp_types.ServerResult(
+                    mcp_types.CallToolResult(
+                        content=[
+                            mcp_types.TextContent(
+                                type="text",
+                                text="not_found: Tool names here are '<server>__<tool>'.",
+                            )
+                        ],
+                        isError=True,
+                    )
+                )
+            slug, tool = parts
         try:
             result = await self._container.tools.call_tool(
                 CallContext(
                     principal=req.principal,
                     team_id=req.team_id,
-                    connector_slug=req.connector_slug,
-                    tool=request.params.name,
+                    connector_slug=slug,
+                    tool=tool,
                     transport=Transport.MCP,
                 ),
                 request.params.arguments or {},

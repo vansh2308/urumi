@@ -134,6 +134,7 @@ def build_container(settings: Settings) -> Container:
             upstream=upstream,
             audit=audit,
             metrics=metrics,
+            aggregate_list_timeout_seconds=settings.upstream.aggregate_list_timeout_seconds,
         ),
         activity=ActivityService(db),
         retention=RetentionService(db, rate_limiter=rate_limiter, settings=settings.retention),

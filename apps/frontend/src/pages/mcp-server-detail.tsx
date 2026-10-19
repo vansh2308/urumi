@@ -227,6 +227,10 @@ export default function McpServerDetailPage() {
                   <CopyButton value={`/v1/mcp/${serverId}`} label="Copy MCP route" />
                 </span>
               </Meta>
+              <Meta label="Tool names">
+                <span className="font-mono text-xs">{serverId}__&lt;tool&gt;</span>{" "}
+                <span className="text-muted-foreground">on /v1/mcp</span>
+              </Meta>
             </dl>
           </CardContent>
         </Card>

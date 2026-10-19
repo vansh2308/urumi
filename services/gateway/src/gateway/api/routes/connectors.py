@@ -34,7 +34,7 @@ from gateway.api.schemas import (
 from gateway.db.models import Connector
 from gateway.services.connectors import ConnectorChange, GrantView, NewConnector, ToolSet
 from gateway.services.principal import Principal
-from gateway.services.tools import CallContext, Transport
+from gateway.services.tools import CallContext, Transport, qualified_name
 
 registry = APIRouter(prefix=f"{API_PREFIX}/connectors", tags=["connector registry"])
 team = APIRouter(prefix=f"{API_PREFIX}/teams/{{team_id}}", tags=["team connectors & tools"])
@@ -263,6 +263,25 @@ async def list_tools(slug: str, ctx: TeamDep, container: ContainerDep) -> list[d
     """Tools the caller may invoke, as MCP tool definitions (session, or key with tools:read)."""
     tools = await container.tools.list_tools(ctx, slug)
     return [t.model_dump(mode="json", by_alias=True, exclude_none=True) for t in tools]
+
+
+@team.get("/tools", response_model=dict[str, Any])
+async def list_all_tools(ctx: TeamDep, container: ContainerDep) -> dict[str, Any]:
+    """Every tool the caller may use on every enabled server, the same listing as the ``/v1/mcp``
+    endpoint. Servers that did not answer are reported in ``unavailable``."""
+    listing = await container.tools.list_all_tools(ctx)
+    return {
+        "tools": [
+            {
+                "connector": server.slug,
+                "qualified_name": qualified_name(server.slug, tool.name),
+            }
+            | tool.model_dump(mode="json", by_alias=True, exclude_none=True)
+            for server in listing.servers
+            for tool in server.tools
+        ],
+        "unavailable": [{"connector": slug, "code": code} for slug, code in listing.unavailable],
+    }
 
 
 @team.post("/connectors/{slug}/tools/{tool_name}/call", response_model=dict[str, Any])

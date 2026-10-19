@@ -189,6 +189,12 @@ class UpstreamSettings(BaseSettings):
     queue_timeout_seconds: float = Field(
         default=2.0, ge=0, description="How long a call waits for a free concurrency slot."
     )
+    aggregate_list_timeout_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        description="On the all-servers MCP endpoint, a server whose tool list takes longer is "
+        "left out of that listing instead of delaying it.",
+    )
     tool_cache_ttl_seconds: float = Field(
         default=60.0, ge=0, description="How long a connector's tool list is cached."
     )

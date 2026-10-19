@@ -24,6 +24,7 @@ import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { CreateKeyDialog } from "@/features/api-keys/create-key-dialog"
 import { RotateKeyDialog } from "@/features/api-keys/rotate-key-dialog"
+import { ConnectMcpCard } from "@/features/mcp-endpoint/connect-mcp-card"
 import { useToolKey } from "@/features/tool-key/use-tool-key"
 import { useApiKeys, useRevokeApiKey } from "@/hooks/queries/use-api-keys"
 import { useMemberNames } from "@/hooks/queries/use-member-names"
@@ -212,6 +213,8 @@ export default function ApiKeysPage() {
           </div>
         }
       />
+
+      <ConnectMcpCard />
 
       <CreateKeyDialog
         open={creating}
