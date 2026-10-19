@@ -261,6 +261,43 @@ avoid throttling). Startup probes cover slow starts, liveness checks only the pr
 readiness checks the database (the MCP server does not check the store, so a store outage does
 not drain every replica).
 
+## Observability
+
+| Question | Where to look |
+| --- | --- |
+| Is each server up, and if not, why? | Dashboard → MCP servers (Health column, hover for the reason) or `GET /v1/teams/{team}/connectors/status`: a live MCP ping per server with `connected` / `unreachable` (+ `error_code`, `error_message`) / `disabled`, latency, last success and last failure. Platform admins: `GET /v1/connectors/status` (every server). |
+| Why did a call fail? | Dashboard → Audit logs and Usage (per call: user, server, tool, outcome, error code, duration, request id). Error codes: `upstream_unavailable`, `upstream_timeout`, `upstream_unauthorized`, `upstream_blocked`, `upstream_bad_response`, `upstream_rejected`, `upstream_busy`, `tool_error`, `denied`. |
+| Calls, error rate, latency per server | Dashboard → Usage / Overview (from the database), or Prometheus. |
+| Following one request | Every response has `X-Request-ID`; the agent, gateway and MCP servers log it on every line (JSON logs: `kubectl -n urumi logs deploy/<name>`). |
+
+Prometheus metrics (gateway; the agent has `agent_*` equivalents for runs, LLM calls, tokens and
+tool calls):
+
+| Metric | Labels |
+| --- | --- |
+| `gateway_tool_invocations_total` | `connector`, `tool`, `outcome` |
+| `gateway_tool_invocation_duration_seconds` | `connector` |
+| `gateway_upstream_failures_total` | `connector`, `reason` |
+| `gateway_upstream_up` | `connector` (1/0 from the last exchange) |
+| `gateway_http_requests_total`, `gateway_http_request_duration_seconds` | `method`, `route`, `status` |
+| `gateway_rate_limited_total`, `gateway_auth_failures_total` | `scope` / `kind` |
+
+`/metrics` answers only direct in-cluster requests (anything through the ingress or the
+dashboard proxy gets 404). The gateway and agent pods carry `prometheus.io/scrape|port|path`
+annotations, so any Prometheus that discovers pods by annotation scrapes them; none is installed
+by these charts, to keep the cluster light. To add one later:
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm install monitoring prometheus-community/prometheus -n monitoring --create-namespace \
+  --set alertmanager.enabled=false --set prometheus-pushgateway.enabled=false
+```
+
+(and allow ingress from the `monitoring` namespace in the gateway and agent NetworkPolicies).
+Useful queries: error rate per server
+`sum by (connector) (rate(gateway_tool_invocations_total{outcome!="success"}[5m])) / sum by (connector) (rate(gateway_tool_invocations_total[5m]))`,
+p95 latency `histogram_quantile(0.95, sum by (le, connector) (rate(gateway_tool_invocation_duration_seconds_bucket[5m])))`.
+
 ## 5. Upgrades and rollbacks
 
 * Each deploy is a Helm revision. Images are tagged with the commit (`global.imageTag`, or a
