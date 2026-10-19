@@ -8,6 +8,7 @@ import type {
   CallToolResult,
   CatalogEntry,
   Connector,
+  ConnectorStatus,
   CreateApiKeyRequest,
   DeployHostedServerRequest,
   Grant,
@@ -160,6 +161,9 @@ export const gateway = {
     update: (token: string, id: string, body: UpdateConnectorRequest) =>
       patch<Connector>(token, `/v1/connectors/${id}`, body),
     remove: (token: string, id: string) => del(token, `/v1/connectors/${id}`),
+    registryStatus: (token: string) => get<ConnectorStatus[]>(token, "/v1/connectors/status"),
+    teamStatus: (token: string, teamId: string) =>
+      get<ConnectorStatus[]>(token, `${team(teamId)}/connectors/status`),
     probe: (token: string, id: string) => post<Probe>(token, `/v1/connectors/${id}/probe`),
 
     // Team policy, discovery and grants

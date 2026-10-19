@@ -20,11 +20,13 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { describeAccess } from "@/features/connectors/access"
 import { ConnectorFormDialog } from "@/features/connectors/connector-form-dialog"
+import { HealthBadge } from "@/features/connectors/health-badge"
 import { HostedServerDialog } from "@/features/connectors/hosted-server-dialog"
 import { TeamPolicyDialog } from "@/features/connectors/team-policy-dialog"
 import { useConnectorActions } from "@/features/connectors/use-connector-actions"
 import {
   useAllTools,
+  useConnectorStatus,
   useHostedServers,
   useHostedSettings,
   useProbeConnector,
@@ -53,6 +55,7 @@ export default function McpServersPage() {
   const hostedSettings = useHostedSettings(isPlatformAdmin)
   const hosted = useHostedServers(isPlatformAdmin && hostedSettings.data?.enabled === true)
   const catalog = useAllTools(teamId)
+  const status = useConnectorStatus(teamId, isPlatformAdmin)
   const probe = useProbeConnector()
   const actions = useConnectorActions(teamId)
   const [registering, setRegistering] = useState(false)
@@ -141,17 +144,9 @@ export default function McpServersPage() {
     },
     {
       id: "health",
-      accessorFn: (r) => r.health,
+      accessorFn: (r) => status.data?.get(r.slug)?.state ?? r.health,
       header: "Health",
-      cell: ({ row }) =>
-        row.original.health === "unknown" ? (
-          <span className="text-muted-foreground">—</span>
-        ) : (
-          <StatusBadge
-            status={row.original.health === "reachable" ? "ready" : "unreachable"}
-            label={row.original.health === "reachable" ? "Reachable" : "Unreachable"}
-          />
-        ),
+      cell: ({ row }) => <HealthBadge status={status.data?.get(row.original.slug)} />,
     },
     {
       id: "access",
@@ -273,6 +268,7 @@ export default function McpServersPage() {
               size="sm"
               onClick={() => {
                 void registry.refetch()
+                void status.refetch()
                 catalog.refetch()
               }}
             >

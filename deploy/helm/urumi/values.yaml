@@ -108,6 +108,12 @@ gateway:
   component: gateway
   image:
     repository: urumi/gateway
+  # Standard scrape hints, picked up by a Prometheus using pod annotations (none is installed by
+  # this chart). /metrics answers only direct in-cluster requests, never the ingress.
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8100"
+    prometheus.io/path: /metrics
   containerPort: 8100
   service:
     port: 8100
@@ -209,6 +215,12 @@ agent:
   component: agent
   image:
     repository: urumi/agent
+  # Standard scrape hints, picked up by a Prometheus using pod annotations (none is installed by
+  # this chart). /metrics answers only direct in-cluster requests, never the ingress.
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8201"
+    prometheus.io/path: /metrics
   containerPort: 8201
   service:
     port: 8201

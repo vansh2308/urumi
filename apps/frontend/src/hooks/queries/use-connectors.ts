@@ -44,6 +44,25 @@ export function useUpdateConnector() {
   })
 }
 
+/** Live reachability per connector, keyed by slug: the team's connectors, plus every registered
+ *  one (disabled included) for platform admins. Refreshed every 30 s while visible. */
+export function useConnectorStatus(teamId: string, isPlatformAdmin: boolean) {
+  const query = useQuery({
+    queryKey: qk.connectorStatus(teamId, isPlatformAdmin),
+    queryFn: async () => {
+      const token = sessionToken()
+      const [team, registry] = await Promise.all([
+        gateway.connectors.teamStatus(token, teamId),
+        isPlatformAdmin ? gateway.connectors.registryStatus(token) : Promise.resolve([]),
+      ])
+      return new Map([...registry, ...team].map((s) => [s.slug, s]))
+    },
+    refetchInterval: 30_000,
+    retry: false,
+  })
+  return query
+}
+
 export function useRemoveConnector() {
   const queryClient = useQueryClient()
   return useMutation({

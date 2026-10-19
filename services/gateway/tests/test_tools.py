@@ -426,3 +426,27 @@ async def test_single_endpoint_lists_every_server_and_routes_calls(
     assert denied.isError is True
     assert rest.status_code == 200
     assert {"connector": dead, "code": "upstream_unavailable"} in rest.json()["unavailable"]
+
+
+async def test_connector_status_reports_the_reason(
+    app_client: AppClient, database_dsn: str, upstream_url: str, closed_port_url: str
+) -> None:
+    async with app_client() as client:
+        world = await build_world(client, database_dsn, upstream_url, member_tools=["echo"])
+        dead = f"dead-{world.slug}"
+        await _add_connector(client, world, dead, closed_port_url, tools=["echo"])
+        team = await client.get(
+            f"/v1/teams/{world.team_id}/connectors/status", headers=world.admin.auth
+        )
+        registry = await client.get("/v1/connectors/status", headers=world.admin.auth)
+        by_member = await client.get("/v1/connectors/status", headers=world.member.auth)
+        metrics = await client.get("/metrics")
+
+    by_slug = {s["slug"]: s for s in team.json()}
+    assert by_slug[world.slug]["state"] == "connected"
+    assert by_slug[world.slug]["latency_ms"] is not None
+    assert by_slug[dead]["state"] == "unreachable"
+    assert by_slug[dead]["error_code"] == "upstream_unavailable"
+    assert by_slug[dead]["last_failure"]["error_code"] == "upstream_unavailable"
+    assert registry.status_code == 200 and by_member.status_code == 403
+    assert f'gateway_upstream_up{{connector="{dead}"}} 0.0' in metrics.text

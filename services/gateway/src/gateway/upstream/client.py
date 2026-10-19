@@ -19,6 +19,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 import anyio
@@ -58,6 +59,24 @@ class UpstreamTarget:
     headers: Mapping[str, str] = field(default_factory=dict, repr=False)
     # Re-check where the host resolves before connecting (admin-supplied URLs; see ssrf.py).
     verify_destination: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class Exchange:
+    """Outcome of one exchange with an upstream, kept in memory per connector and replica."""
+
+    ok: bool
+    at: datetime
+    duration_ms: float
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+@dataclass(slots=True)
+class UpstreamHealth:
+    last: Exchange | None = None
+    last_success_at: datetime | None = None
+    last_failure: Exchange | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +145,39 @@ class McpUpstreamClient:
         # Process-wide caches keyed by connector; they hold no per-request state.
         self._limiters: dict[uuid.UUID, tuple[int, asyncio.Semaphore]] = {}
         self._tool_cache: dict[uuid.UUID, tuple[float, str, list[mcp_types.Tool]]] = {}
+        self._health: dict[uuid.UUID, UpstreamHealth] = {}
+
+    def health(self, connector_id: uuid.UUID) -> UpstreamHealth:
+        """What this replica last saw from the connector (calls, listings and pings)."""
+        return self._health.get(connector_id) or UpstreamHealth()
+
+    async def ping(self, target: UpstreamTarget) -> float:
+        """Open an MCP session and ping it; returns the round-trip time in milliseconds.
+
+        Bypasses the tool cache, so it reflects whether the server answers right now."""
+        started = time.perf_counter()
+
+        async def ping(session: ClientSession, _: mcp_types.InitializeResult) -> None:
+            await session.send_ping()
+
+        await self._run(target, ping)
+        return (time.perf_counter() - started) * 1000
+
+    def _observe(self, target: UpstreamTarget, started: float, error: UpstreamError | None) -> None:
+        exchange = Exchange(
+            ok=error is None,
+            at=datetime.now(UTC),
+            duration_ms=round((time.perf_counter() - started) * 1000, 1),
+            error_code=error.code if error else None,
+            error_message=error.public_message if error else None,
+        )
+        health = self._health.setdefault(target.connector_id, UpstreamHealth())
+        health.last = exchange
+        if error is None:
+            health.last_success_at = exchange.at
+        else:
+            health.last_failure = exchange
+        self._metrics.upstream_up.labels(connector=target.slug).set(1 if error is None else 0)
 
     async def list_tools(self, target: UpstreamTarget) -> list[mcp_types.Tool]:
         cached = self._tool_cache.get(target.connector_id)
@@ -174,6 +226,7 @@ class McpUpstreamClient:
         target: UpstreamTarget,
         operation: Callable[[ClientSession, mcp_types.InitializeResult], Awaitable[T]],
     ) -> T:
+        started = time.perf_counter()
         if target.verify_destination:
             try:
                 await check_destination(target.url, self._settings)
@@ -185,9 +238,11 @@ class McpUpstreamClient:
                     "upstream destination blocked",
                     extra={"connector": target.slug, "reason": exc.reason},
                 )
-                raise UpstreamBlockedError(
+                blocked = UpstreamBlockedError(
                     f"The connector's address is not allowed: {exc.reason}."
-                ) from exc
+                )
+                self._observe(target, started, blocked)
+                raise blocked from exc
         async with self._slot(target):
             token = _call_headers.set((_origin(httpx.URL(target.url)), target.headers))
             try:
@@ -197,9 +252,12 @@ class McpUpstreamClient:
                         ClientSession(r, w) as session,
                     ):
                         init = await session.initialize()
-                        return await operation(session, init)
+                        result = await operation(session, init)
+                self._observe(target, started, None)
+                return result
             except Exception as exc:
                 error = _classify(exc)
+                self._observe(target, started, error)
                 self._metrics.upstream_failures.labels(
                     connector=target.slug, reason=error.code
                 ).inc()

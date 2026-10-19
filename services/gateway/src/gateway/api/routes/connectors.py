@@ -21,7 +21,9 @@ from gateway.api.schemas import (
     CallToolRequest,
     CatalogEntryOut,
     ConnectorOut,
+    ConnectorStatusOut,
     CredentialOut,
+    ExchangeOut,
     GrantOut,
     ProbeOut,
     RegisterConnectorRequest,
@@ -32,7 +34,14 @@ from gateway.api.schemas import (
     UpdateConnectorRequest,
 )
 from gateway.db.models import Connector
-from gateway.services.connectors import ConnectorChange, GrantView, NewConnector, ToolSet
+from gateway.errors import PermissionDeniedError
+from gateway.services.connectors import (
+    ConnectorChange,
+    ConnectorStatus,
+    GrantView,
+    NewConnector,
+    ToolSet,
+)
 from gateway.services.principal import Principal
 from gateway.services.tools import CallContext, Transport, qualified_name
 
@@ -58,6 +67,28 @@ def connector_out(connector: Connector, principal: Principal) -> ConnectorOut:
         out.created_at = connector.created_at
         out.updated_at = connector.updated_at
     return out
+
+
+def _status_out(status: ConnectorStatus) -> ConnectorStatusOut:
+    failure = status.last_failure
+    return ConnectorStatusOut(
+        slug=status.connector.slug,
+        display_name=status.connector.display_name,
+        state=status.state,
+        error_code=status.error_code,
+        error_message=status.error_message,
+        latency_ms=status.latency_ms,
+        checked_at=status.checked_at,
+        last_success_at=status.last_success_at,
+        last_failure=ExchangeOut(
+            at=failure.at,
+            error_code=failure.error_code,
+            error_message=failure.error_message,
+            duration_ms=failure.duration_ms,
+        )
+        if failure
+        else None,
+    )
 
 
 def _toolset(tools: ToolSet) -> ToolSetOut:
@@ -109,6 +140,17 @@ async def list_connectors(
     return [
         connector_out(c, principal) for c in await container.connectors.list_registry(principal)
     ]
+
+
+@registry.get("/status", response_model=list[ConnectorStatusOut])
+async def registry_status(
+    principal: SessionPrincipalDep, container: ContainerDep
+) -> list[ConnectorStatusOut]:
+    """Ping every registered connector now (platform admin): connected, unreachable (with the
+    reason) or disabled. Servers are pinged in parallel; each gets at most 10 s."""
+    if not principal.is_platform_admin:
+        raise PermissionDeniedError("Registry-wide connector status is for platform admins.")
+    return [_status_out(s) for s in await container.connectors.registry_status(principal)]
 
 
 @registry.get("/{connector_id}", response_model=ConnectorOut)
@@ -183,6 +225,12 @@ async def list_team_connectors(ctx: TeamDep, container: ContainerDep) -> list[Te
         )
         for v in views
     ]
+
+
+@team.get("/connectors/status", response_model=list[ConnectorStatusOut])
+async def team_connector_status(ctx: TeamDep, container: ContainerDep) -> list[ConnectorStatusOut]:
+    """Ping the team's connectors you can see: connected or unreachable, with the reason."""
+    return [_status_out(s) for s in await container.connectors.team_status(ctx)]
 
 
 @team.put("/connectors/{slug}", response_model=TeamConnectorOut)

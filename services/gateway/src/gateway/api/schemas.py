@@ -371,6 +371,31 @@ class HostedSettingsOut(BaseModel):
     max_servers: int
 
 
+class ExchangeOut(BaseModel):
+    at: datetime
+    error_code: str | None
+    error_message: str | None
+    duration_ms: float
+
+
+class ConnectorStatusOut(BaseModel):
+    slug: str
+    display_name: str
+    state: str = Field(description="connected | unreachable | disabled (a ping, just now)")
+    error_code: str | None = Field(
+        default=None, description="Why it is unreachable, e.g. upstream_unavailable."
+    )
+    error_message: str | None = None
+    latency_ms: float | None = Field(default=None, description="MCP initialize + ping.")
+    checked_at: datetime
+    last_success_at: datetime | None = Field(
+        default=None, description="Last successful exchange seen by this gateway replica."
+    )
+    last_failure: ExchangeOut | None = Field(
+        default=None, description="Last failed exchange seen by this gateway replica."
+    )
+
+
 class ToolOut(BaseModel):
     name: str
     title: str | None = None

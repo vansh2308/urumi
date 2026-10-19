@@ -6,7 +6,7 @@ only carry names of registered connectors and tools that passed authorization.
 
 from __future__ import annotations
 
-from prometheus_client import CollectorRegistry, Counter, Histogram, generate_latest
+from prometheus_client import CollectorRegistry, Counter, Gauge, Histogram, generate_latest
 from prometheus_client.exposition import CONTENT_TYPE_LATEST
 
 _LATENCY_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60)
@@ -47,6 +47,12 @@ class Metrics:
             "gateway_upstream_failures_total",
             "Failures talking to upstream MCP servers by reason.",
             ["connector", "reason"],
+            registry=self.registry,
+        )
+        self.upstream_up = Gauge(
+            "gateway_upstream_up",
+            "1 if the last exchange with the connector succeeded, 0 if it failed.",
+            ["connector"],
             registry=self.registry,
         )
         self.rate_limited = Counter(

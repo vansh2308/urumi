@@ -66,6 +66,12 @@ class ServerSettings(BaseSettings):
         default=True,
         description="Serve Prometheus metrics at /metrics. Restrict it to the cluster network.",
     )
+    metrics_via_proxy: bool = Field(
+        default=False,
+        description="Also answer /metrics for requests that came through a proxy or ingress "
+        "(X-Forwarded-For set). Off: only direct in-cluster scrapes get metrics, so they are "
+        "never public even though the API is behind an ingress.",
+    )
     docs_enabled: bool = Field(default=True, description="Serve OpenAPI docs at /docs.")
 
     @field_validator("cors_allowed_origins", mode="before")
