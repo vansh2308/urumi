@@ -4,6 +4,10 @@
 # through a private temp file that is removed on exit.
 #
 #   deploy/scripts/create-local-secrets.sh [namespace]      # default: urumi
+#   ENV_SUFFIX=.production deploy/scripts/create-local-secrets.sh   # reads .env.production
+#
+# On a VPS, run it from a checkout on a trusted machine with KUBECONFIG pointing at the server,
+# with production values in services/*/.env.production (gitignored).
 #
 # Secrets (keys):
 #   woocommerce-mcp-secrets  WC_CONSUMER_KEY, WC_CONSUMER_SECRET, DB_URL
@@ -18,6 +22,7 @@
 set -euo pipefail
 
 NAMESPACE="${1:-urumi}"
+ENV_SUFFIX="${ENV_SUFFIX:-}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORKDIR="$(mktemp -d)"
 chmod 700 "${WORKDIR}"
@@ -55,8 +60,8 @@ apply_secret() {
 }
 
 kubectl get namespace "${NAMESPACE}" >/dev/null
-apply_secret woocommerce-mcp-secrets "${ROOT}/services/woocommerce-mcp/.env" \
+apply_secret woocommerce-mcp-secrets "${ROOT}/services/woocommerce-mcp/.env${ENV_SUFFIX}" \
   WC_CONSUMER_KEY WC_CONSUMER_SECRET DB_URL
-apply_secret gateway-secrets "${ROOT}/services/gateway/.env" \
+apply_secret gateway-secrets "${ROOT}/services/gateway/.env${ENV_SUFFIX}" \
   DB_URL AUTH_TOKEN_PEPPER UPSTREAM_CREDENTIAL_KEYS
-apply_secret agent-secrets "${ROOT}/services/agent/.env" DB_URL GEMINI_API_KEY
+apply_secret agent-secrets "${ROOT}/services/agent/.env${ENV_SUFFIX}" DB_URL GEMINI_API_KEY

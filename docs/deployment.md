@@ -335,44 +335,13 @@ WordPress volume survive an uninstall too, the store values example sets
 
 ## 7. Production on a VPS
 
-1. Install k3s (`curl -sfL https://get.k3s.io | sh -`). Its Traefik binds 80/443 on the node;
-   point DNS for your hosts at the server.
-2. Install cert-manager with a Let's Encrypt `ClusterIssuer`, and add its annotation to the
-   ingresses in your copy of `values-production.yaml` (TLS secret names are already set).
-3. Push the images to a registry the node can pull from (add `imagePullSecrets` if private):
-
-   ```bash
-   TAG=$(git rev-parse --short HEAD)
-   for s in woocommerce-mcp gateway agent; do
-     docker build --platform linux/amd64 -t registry.example.com/urumi/$s:$TAG services/$s
-     docker push registry.example.com/urumi/$s:$TAG
-   done
-   docker build --platform linux/amd64 -t registry.example.com/urumi/frontend:$TAG apps/frontend
-   docker push registry.example.com/urumi/frontend:$TAG
-   ```
-
-4. Deploy the store with a real domain over HTTPS (`wordpressHost`, `wordpressScheme: https`,
-   ingress TLS), and create WooCommerce REST API keys for the MCP server in wp-admin.
-5. Create the namespace and the three Secrets with production values (a new
-   `AUTH_TOKEN_PEPPER` from `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`,
-   a new `UPSTREAM_CREDENTIAL_KEYS` from `docker run --rm <gateway image> gateway-admin
-   generate-credential-key`, and production database URLs). Review `HOSTED_ALLOWED_IMAGES` and
-   pin hosted images by digest (`image@sha256:…`).
-6. Copy `deploy/helm/urumi/values-production.yaml`, set the hosts, `WC_BASE_URL` (the store's
-   HTTPS home URL) and registry, then:
-
-   ```bash
-   helm dependency build deploy/helm/urumi
-   helm upgrade --install urumi deploy/helm/urumi -n urumi --create-namespace \
-     -f deploy/helm/urumi/values.yaml -f my-values-production.yaml \
-     --set global.imageTag=$TAG --wait --timeout 10m
-   ```
-
-7. Create the first platform admin once, then register the connector with the in-cluster URL:
-
-   ```bash
-   kubectl -n urumi exec deploy/gateway -- gateway-admin grant-platform-admin you@example.com
-   ```
+The full walkthrough is [vps.md](vps.md): `deploy/scripts/vps-bootstrap.sh` (k3s, Helm,
+cert-manager), the Let's Encrypt `ClusterIssuer` in `deploy/vps/`, Secrets with
+`ENV_SUFFIX=.production deploy/scripts/create-local-secrets.sh`, the store from
+`deploy/helm/woocommerce/values-production.example.yaml`, images with
+`deploy/scripts/push-images.sh` (or `.github/workflows/images.yml`), and the release with
+`deploy/scripts/deploy-vps.sh`. Only values change between environments; vps.md has the
+local-vs-production table.
 
 Production values run two replicas of each service with a PodDisruptionBudget, `APP_ENV=production`
 (which makes the MCP server refuse a plain-HTTP store) and API docs disabled. Keep the MCP server

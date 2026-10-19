@@ -89,4 +89,5 @@ WordPress warms up (the probe times out after 2 s); it turns `ok` on the next ca
 The same layout holds with a real domain: point DNS at the server, publish 80/443 to the
 ingress (k3d as above, or k3s directly, whose bundled Traefik binds 80/443 on the node), set
 `wordpressHost` and `WC_BASE_URL` to the domain, and use `https` with a real certificate
-(for example cert-manager with Let's Encrypt) instead of `WC_ALLOW_INSECURE_HTTP`.
+(for example cert-manager with Let's Encrypt) instead of `WC_ALLOW_INSECURE_HTTP`. The
+step-by-step guide is [vps.md](vps.md).

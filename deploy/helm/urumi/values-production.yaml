@@ -1,9 +1,22 @@
-# Production template: single-node k3s (or any cluster) on a VPS. Copy, fill in the hosts, push
-# images to a registry, create the three Secrets with real values, then:
+# Production: single-node k3s on a VPS (any cluster works). Layered on values.yaml:
+#
 #   helm upgrade --install urumi deploy/helm/urumi -n urumi \
-#     -f deploy/helm/urumi/values.yaml -f values-production.yaml \
-#     --set global.imageTag=<git-sha> --wait --timeout 10m
-# Use cert-manager (or your provider) for TLS; the Secrets named in `tls` are created by it.
+#     -f deploy/helm/urumi/values.yaml -f deploy/helm/urumi/values-production.yaml \
+#     --set global.imageTag=<git-sha> --atomic --wait --timeout 10m
+#
+# deploy/scripts/deploy-vps.sh does exactly this; docs/vps.md is the full walkthrough. Replace
+# every example.com host with yours (or pass them with --set, as deploy-vps.sh does) and point
+# image repositories at your registry. TLS certificates come from cert-manager (the
+# letsencrypt ClusterIssuer in deploy/vps/cluster-issuer.yaml); the `tls` Secrets are created
+# by it. Secrets are never in this file: create them as in docs/vps.md.
+#
+# What differs from values-local.yaml:
+#   hosts           app./gateway./shop.<domain> with HTTPS        (local: *.local over HTTP)
+#   images          pushed to a registry, pinned by git SHA        (local: k3d image import)
+#   replicas        2 per service + PodDisruptionBudget            (local: 1)
+#   store access    HTTPS on the store's real domain, Basic auth   (local: HTTP + OAuth 1.0a)
+#   API docs        off                                            (local: on)
+#   Kubernetes API  the node's IP for the gateway's egress rule    (local: k3d Docker network)
 
 x-replicated: &replicated
   replicaCount: 2
@@ -12,41 +25,70 @@ x-replicated: &replicated
     minAvailable: 1
   topologySpreadConstraints: []
 
+x-tls-annotations: &tlsAnnotations
+  cert-manager.io/cluster-issuer: letsencrypt
+  traefik.ingress.kubernetes.io/router.entrypoints: websecure
+  traefik.ingress.kubernetes.io/router.tls: "true"
+
 woocommerce-mcp:
   <<: *replicated
   image:
-    repository: registry.example.com/urumi/woocommerce-mcp
+    repository: ghcr.io/your-org/urumi-woocommerce-mcp
     pullPolicy: IfNotPresent
   env:
     APP_ENV: production
-    # A real store over HTTPS (HTTP Basic with the consumer key/secret). Plain HTTP is refused
-    # in production.
+    # The store's public HTTPS home URL (WordPress home/siteurl). Plain HTTP is refused in
+    # production; over TLS the server authenticates with HTTP Basic.
     WC_BASE_URL: https://shop.example.com
     WC_ALLOW_INSECURE_HTTP: "false"
+  # Reach the store through the cluster's own ingress (Traefik) instead of hair-pinning out to
+  # the public IP: the name resolves to Traefik's ClusterIP inside the pod, TLS still matches
+  # the certificate.
+  hostAliasesFromServices:
+    - hostnames: [shop.example.com]
+      service: traefik
+      namespace: kube-system
+  networkPolicy:
+    extraEgress:
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: kube-system
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/name: traefik
+        ports:
+          - { port: 8443, protocol: TCP }
+          - { port: 8000, protocol: TCP }
   resources:
     requests: { cpu: 100m, memory: 160Mi }
     limits: { memory: 384Mi }
 
 gateway:
   <<: *replicated
-  networkPolicy:
-    # The Kubernetes API server (hosted MCP servers): your node's IP, port 6443 on k3s.
-    extraEgress:
-      - to: [{ ipBlock: { cidr: 10.0.0.0/8 } }]  # replace with <node-ip>/32
-        ports: [{ port: 6443, protocol: TCP }]
   image:
-    repository: registry.example.com/urumi/gateway
+    repository: ghcr.io/your-org/urumi-gateway
   env:
     APP_ENV: production
     GATEWAY_DOCS_ENABLED: "false"
-    # The ingress controller's pod CIDR (k3s default shown).
+    # Traefik's pods (k3s default pod CIDR): the only proxies whose X-Forwarded-For is trusted.
     GATEWAY_FORWARDED_ALLOW_IPS: 10.42.0.0/16
+    # Pin hosted images by digest in production, e.g. ghcr.io/github/github-mcp-server@sha256:…
+    HOSTED_ALLOWED_IMAGES: >-
+      ghcr.io/github/github-mcp-server:*,ghcr.io/github/github-mcp-server@sha256:*,mcp/duckduckgo:*,mcp/duckduckgo@sha256:*
+  networkPolicy:
+    # The Kubernetes API server (hosted MCP servers): on k3s, the node's private IP, port 6443
+    # (`kubectl get endpoints kubernetes`). Replace the range with <node-ip>/32.
+    extraEgress:
+      - to: [{ ipBlock: { cidr: 10.0.0.0/8 } }]
+        ports: [{ port: 6443, protocol: TCP }]
   resources:
     requests: { cpu: 100m, memory: 192Mi }
     limits: { memory: 512Mi }
   ingress:
     enabled: true
     className: traefik
+    annotations: *tlsAnnotations
     hosts:
       - host: gateway.example.com
         paths: [{ path: /, pathType: Prefix }]
@@ -57,7 +99,7 @@ gateway:
 agent:
   <<: *replicated
   image:
-    repository: registry.example.com/urumi/agent
+    repository: ghcr.io/your-org/urumi-agent
   env:
     APP_ENV: production
     AGENT_DOCS_ENABLED: "false"
@@ -72,10 +114,11 @@ agent:
 frontend:
   <<: *replicated
   image:
-    repository: registry.example.com/urumi/frontend
+    repository: ghcr.io/your-org/urumi-frontend
   ingress:
     enabled: true
     className: traefik
+    annotations: *tlsAnnotations
     hosts:
       - host: app.example.com
         paths: [{ path: /, pathType: Prefix }]
