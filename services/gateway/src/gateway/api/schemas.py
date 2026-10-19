@@ -267,6 +267,7 @@ class ConnectorOut(BaseModel):
     display_name: str
     description: str
     enabled: bool
+    kind: str | None = Field(default=None, description="'remote' (by URL) or 'hosted'.")
     url: str | None = None
     credential: CredentialOut | None = Field(
         default=None, description="The credential's header name only; the value is never shown."
@@ -275,6 +276,96 @@ class ConnectorOut(BaseModel):
     max_concurrency: int | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+class DeployHostedServerRequest(RequestModel):
+    slug: Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9-]{0,58}$")] = Field(
+        description="Connector slug; the cluster objects are named mcp-<slug>."
+    )
+    display_name: Annotated[str, Field(min_length=1, max_length=100)]
+    description: Annotated[str, Field(max_length=500)] = ""
+    image: Annotated[str, Field(min_length=1, max_length=300)] = Field(
+        description="Container image speaking MCP Streamable HTTP. Must match "
+        "HOSTED_ALLOWED_IMAGES, e.g. mcp/duckduckgo:latest."
+    )
+    port: int = Field(ge=1, le=65535, description="Port the server listens on.")
+    path: Annotated[str, Field(max_length=200)] = Field(
+        default="/mcp", description="MCP endpoint path."
+    )
+    args: Annotated[list[Annotated[str, Field(max_length=500)]], Field(max_length=30)] = Field(
+        default_factory=list, description="Container arguments (replace the image's CMD)."
+    )
+    env: dict[str, Annotated[str, Field(max_length=4096)]] = Field(
+        default_factory=dict, description="Plain environment variables (not secret)."
+    )
+    secret_env: dict[str, SecretStr] = Field(
+        default_factory=dict,
+        description="Secret environment variables. Stored only in the server's Kubernetes "
+        "Secret; never returned.",
+    )
+    credential: CredentialIn | None = Field(
+        default=None, description="Header the gateway sends to the server on every call."
+    )
+    cpu_millicores: int | None = Field(default=None, ge=10)
+    memory_mib: int | None = Field(default=None, ge=32)
+    egress: Literal["internet", "none"] = Field(
+        default="internet",
+        description="'internet': public addresses on 80/443 only (never cluster or private "
+        "ranges). 'none': DNS only.",
+    )
+    timeout_seconds: float | None = Field(default=None, gt=0)
+    max_concurrency: int | None = Field(default=None, ge=1, le=1000)
+
+
+class UpdateHostedServerRequest(RequestModel):
+    image: Annotated[str, Field(min_length=1, max_length=300)] | None = None
+    args: Annotated[list[Annotated[str, Field(max_length=500)]], Field(max_length=30)] | None = None
+    env: dict[str, Annotated[str, Field(max_length=4096)]] | None = Field(
+        default=None, description="Replaces every plain variable."
+    )
+    secret_env: dict[str, SecretStr | None] | None = Field(
+        default=None,
+        description="Secret variables to set; null removes one. Others are kept.",
+    )
+    cpu_millicores: int | None = Field(default=None, ge=10)
+    memory_mib: int | None = Field(default=None, ge=32)
+    egress: Literal["internet", "none"] | None = None
+
+
+class HostedStatusOut(BaseModel):
+    phase: str = Field(description="deploying | ready | failed | stopped | missing | unknown")
+    reason: str | None = None
+    ready_replicas: int
+    restarts: int
+
+
+class HostedServerOut(BaseModel):
+    connector: ConnectorOut
+    image: str
+    port: int
+    path: str
+    args: list[str]
+    env: dict[str, str]
+    secret_env_keys: list[str] = Field(description="Names only; values are never returned.")
+    cpu_millicores: int
+    memory_mib: int
+    egress: str
+    namespace: str
+    k8s_name: str
+    status: HostedStatusOut
+    created_at: datetime
+    updated_at: datetime
+
+
+class HostedSettingsOut(BaseModel):
+    enabled: bool
+    namespace: str
+    allowed_images: list[str]
+    default_cpu_millicores: int
+    max_cpu_millicores: int
+    default_memory_mib: int
+    max_memory_mib: int
+    max_servers: int
 
 
 class ToolOut(BaseModel):

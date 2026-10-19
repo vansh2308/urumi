@@ -40,7 +40,7 @@ registry = APIRouter(prefix=f"{API_PREFIX}/connectors", tags=["connector registr
 team = APIRouter(prefix=f"{API_PREFIX}/teams/{{team_id}}", tags=["team connectors & tools"])
 
 
-def _connector_out(connector: Connector, principal: Principal) -> ConnectorOut:
+def connector_out(connector: Connector, principal: Principal) -> ConnectorOut:
     out = ConnectorOut(
         id=connector.id,
         slug=connector.slug,
@@ -49,6 +49,7 @@ def _connector_out(connector: Connector, principal: Principal) -> ConnectorOut:
         enabled=connector.enabled,
     )
     if principal.is_platform_admin:
+        out.kind = connector.kind
         out.url = connector.url
         if connector.credential_header:
             out.credential = CredentialOut(header_name=connector.credential_header)
@@ -97,7 +98,7 @@ async def register_connector(
             credential=body.credential.to_domain() if body.credential else None,
         ),
     )
-    return _connector_out(connector, principal)
+    return connector_out(connector, principal)
 
 
 @registry.get("", response_model=list[ConnectorOut], response_model_exclude_none=True)
@@ -106,7 +107,7 @@ async def list_connectors(
 ) -> list[ConnectorOut]:
     """Registered connectors. Team admins use this to pick what to enable for their team."""
     return [
-        _connector_out(c, principal) for c in await container.connectors.list_registry(principal)
+        connector_out(c, principal) for c in await container.connectors.list_registry(principal)
     ]
 
 
@@ -115,7 +116,7 @@ async def get_connector(
     connector_id: uuid.UUID, principal: SessionPrincipalDep, container: ContainerDep
 ) -> ConnectorOut:
     """Full registry entry (platform admin)."""
-    return _connector_out(await container.connectors.get(principal, connector_id), principal)
+    return connector_out(await container.connectors.get(principal, connector_id), principal)
 
 
 @registry.patch("/{connector_id}", response_model=ConnectorOut)
@@ -140,7 +141,7 @@ async def update_connector(
             clear_credential=body.clear_credential,
         ),
     )
-    return _connector_out(connector, principal)
+    return connector_out(connector, principal)
 
 
 @registry.delete("/{connector_id}", status_code=status.HTTP_204_NO_CONTENT)

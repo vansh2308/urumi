@@ -30,6 +30,8 @@ from gateway.db.engine import Database
 from gateway.db.models import (
     AuditOutcome,
     Connector,
+    ConnectorKind,
+    HostedServer,
     MemberToolGrant,
     TeamConnector,
     TeamMembership,
@@ -42,6 +44,7 @@ from gateway.errors import (
     PermissionDeniedError,
     UpstreamAuthError,
 )
+from gateway.hosted.service import HostedDeployer
 from gateway.services.audit import AuditLog
 from gateway.services.principal import Principal
 from gateway.services.teams import TeamContext, TeamService
@@ -165,6 +168,7 @@ class ConnectorService:
         audit: AuditLog,
         settings: UpstreamSettings,
         cipher: CredentialCipher,
+        deployer: HostedDeployer | None = None,
     ) -> None:
         self._db = db
         self._upstream = upstream
@@ -172,6 +176,7 @@ class ConnectorService:
         self._audit = audit
         self._settings = settings
         self._cipher = cipher
+        self._deployer = deployer
 
     def target_of(self, connector: Connector) -> UpstreamTarget:
         """The upstream call target, with the connector's credential decrypted."""
@@ -272,7 +277,7 @@ class ConnectorService:
             raise NotFoundError("Connector not found.")
         return connector
 
-    async def update(
+    async def update(  # noqa: PLR0912 - one branch per optional field
         self, principal: Principal, connector_id: uuid.UUID, change: ConnectorChange
     ) -> Connector:
         self._require_platform_admin(principal)
@@ -282,7 +287,7 @@ class ConnectorService:
         if change.description is not None:
             values["description"] = change.description.strip()
         if change.url is not None:
-            values["url"] = self._check_url(change.url)
+            values["url"] = change.url.strip()
         if change.enabled is not None:
             values["enabled"] = change.enabled
         if change.timeout_seconds is not None:
@@ -295,6 +300,18 @@ class ConnectorService:
             connector = await session.get(Connector, connector_id, with_for_update=True)
             if connector is None:
                 raise NotFoundError("Connector not found.")
+            hosted = await self._hosted_name(session, connector)
+            if "url" in values:
+                if hosted is not None:
+                    raise InvalidInputError("A hosted server's URL is managed by the platform.")
+                values["url"] = self._check_url(values["url"])
+            if (
+                hosted is not None
+                and "enabled" in values
+                and values["enabled"] != connector.enabled
+            ):
+                # A disabled hosted server is scaled to zero; enabling it starts the pod again.
+                await self._hosted_deployer().scale(hosted, 1 if values["enabled"] else 0)
             for key, value in values.items():
                 setattr(connector, key, value)
             details: dict[str, Any] = {k: v for k, v in values.items() if k != "url"}
@@ -326,6 +343,11 @@ class ConnectorService:
             connector = await session.get(Connector, connector_id, with_for_update=True)
             if connector is None:
                 raise NotFoundError("Connector not found.")
+            hosted = await self._hosted_name(session, connector)
+            if hosted is not None:
+                # Cluster objects go first: if Kubernetes refuses, the registry entry stays so
+                # the removal can be retried and nothing is orphaned.
+                await self._hosted_deployer().teardown(hosted)
             await session.delete(connector)
             self._audit.add(
                 session,
@@ -333,10 +355,24 @@ class ConnectorService:
                 actor=principal,
                 target_type="connector",
                 target_id=connector.id,
-                details={"slug": connector.slug},
+                details={"slug": connector.slug, "kind": connector.kind},
             )
         self._upstream.invalidate(connector_id)
         return connector
+
+    def _hosted_deployer(self) -> HostedDeployer:
+        if self._deployer is None:
+            raise InvalidInputError(
+                "This is a hosted server, and hosted servers are not enabled on this gateway."
+            )
+        return self._deployer
+
+    @staticmethod
+    async def _hosted_name(session: AsyncSession, connector: Connector) -> str | None:
+        if connector.kind != ConnectorKind.HOSTED.value:
+            return None
+        server = await session.get(HostedServer, connector.id)
+        return server.k8s_name if server is not None else None
 
     async def probe(self, principal: Principal, connector_id: uuid.UUID) -> ServerProbe:
         connector = await self.get(principal, connector_id)
