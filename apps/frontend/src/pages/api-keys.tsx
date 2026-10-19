@@ -67,6 +67,11 @@ export default function ApiKeysPage() {
                 Ends with login
               </Badge>
             )}
+            {row.original.oauth_issued && (
+              <Badge variant="outline" className="font-normal">
+                OAuth app · renews hourly
+              </Badge>
+            )}
           </div>
           <div className="font-mono text-xs text-muted-foreground">{row.original.prefix}…</div>
         </div>

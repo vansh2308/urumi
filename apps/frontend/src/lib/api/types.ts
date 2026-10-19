@@ -107,6 +107,37 @@ export interface ApiKey {
   rotated_from_id: string | null
   /** A dashboard key that ends with the login session. */
   session_bound?: boolean
+  /** An OAuth access token of a connected app (short-lived, replaced on refresh). */
+  oauth_issued?: boolean
+}
+
+// --- oauth ----------------------------------------------------------------------------------------
+
+export interface OAuthConfig {
+  enabled: boolean
+  issuer?: string | null
+  mcp_url?: string | null
+}
+
+export interface ConsentRequest {
+  client_id: string
+  /** Self-declared by the client; not verified. */
+  client_name: string | null
+  client_uri: string | null
+  redirect_host: string
+  scopes: string[]
+  expires_at: string
+}
+
+export interface OAuthGrant {
+  id: string
+  client_name: string | null
+  team_id: string
+  team_name: string
+  scopes: string[]
+  created_at: string
+  last_refreshed_at: string | null
+  access_key_prefix: string | null
 }
 
 export interface IssuedApiKey extends ApiKey {

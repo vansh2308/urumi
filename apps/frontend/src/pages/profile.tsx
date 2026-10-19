@@ -8,6 +8,7 @@ import { initials } from "@/components/layout/user-menu"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { ConnectedAppsCard } from "@/features/oauth/connected-apps-card"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Table,
@@ -129,6 +130,8 @@ export default function ProfilePage() {
           </Table>
         </CardContent>
       </Card>
+
+      <ConnectedAppsCard />
 
       <Card>
         <CardHeader>
