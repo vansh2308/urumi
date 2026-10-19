@@ -235,8 +235,16 @@ responses, so any replica can serve any request without sticky sessions.
 | agent | Traefik, dashboard |
 | frontend | Traefik |
 
-Egress is not restricted, because the services call Neon and Gemini on the internet. To lock it
-down, add `networkPolicy.egress` rules with DNS plus your database and provider CIDRs.
+Egress is denied by default too. Each service may reach DNS, the public internet on 443 and 5432
+only (Neon, Gemini, HTTPS upstreams; private, CGNAT and metadata ranges excluded) and its exact
+in-cluster peers: dashboard → gateway and agent, agent → gateway, gateway → WooCommerce MCP and
+hosted servers, MCP server → store. The gateway also reaches the Kubernetes API through
+`gateway.networkPolicy.extraEgress` (per environment: the k3d node network locally, the node's IP
+on a VPS). Add rules with `networkPolicy.extraEgress` rather than replacing `egress`.
+
+**Pod Security**: `deploy-local.sh` labels `urumi` to enforce the `restricted` Pod Security
+Standard (every pod, the store's included, already meets it); `urumi-mcp` enforces it from the
+chart. See [threat-model.md](threat-model.md) for the full threat model.
 
 **ServiceAccounts**: one per service. Only the gateway mounts its token, and its only RBAC is a
 Role in `urumi-mcp` (manage Deployments, Services, Secrets, NetworkPolicies; read Pods) for

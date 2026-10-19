@@ -30,6 +30,14 @@ for entry in ${COMPONENTS}; do
 done
 k3d image import -c "${CLUSTER}" "${images[@]}"
 
+# Every pod in the namespace (ours and the store) meets the "restricted" Pod Security Standard;
+# enforce it so a weaker pod is rejected. The label is idempotent and the namespace is not owned
+# by Helm (the store release shares it).
+kubectl label namespace "${NAMESPACE}" --overwrite \
+  pod-security.kubernetes.io/enforce=restricted \
+  pod-security.kubernetes.io/enforce-version=latest \
+  pod-security.kubernetes.io/warn=restricted >/dev/null
+
 helm dependency build "${ROOT}/deploy/helm/urumi" >/dev/null
 helm upgrade --install urumi "${ROOT}/deploy/helm/urumi" -n "${NAMESPACE}" \
   -f "${ROOT}/deploy/helm/urumi/values.yaml" \
