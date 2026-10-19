@@ -352,3 +352,4 @@ deploy/helm/urumi/Chart.lock
 deploy/helm/woocommerce/*.secret.yaml
 services/*/.env.*
 !services/*/.env.example
+backups/
