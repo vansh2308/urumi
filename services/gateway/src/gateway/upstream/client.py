@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
@@ -232,6 +233,35 @@ class McpUpstreamClient:
             semaphore.release()
 
 
+MAX_DESCRIPTION_CHARS = 2000
+MAX_TITLE_CHARS = 200
+MAX_TOOLS_PER_SERVER = 500
+# C0/C1 control characters except tab and newline, and invisible format characters often used to
+# hide text from people reading a tool description (zero-width, bidi overrides).
+_HIDDEN_CHARS = re.compile(
+    "[\x00-\x08\x0b-\x1f\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]"
+)
+
+
+def _clean_text(value: str | None, limit: int) -> str | None:
+    if value is None:
+        return None
+    cleaned = _HIDDEN_CHARS.sub("", value).strip()
+    return cleaned if len(cleaned) <= limit else cleaned[: limit - 1] + "…"
+
+
+def sanitize_tool(tool: mcp_types.Tool) -> mcp_types.Tool:
+    """Upstream tool metadata is untrusted text that ends up in model prompts and in the
+    dashboard: drop hidden characters and bound its size. Names are checked separately by
+    routing (only allow-listed tool names can be called)."""
+    return tool.model_copy(
+        update={
+            "description": _clean_text(tool.description, MAX_DESCRIPTION_CHARS),
+            "title": _clean_text(tool.title, MAX_TITLE_CHARS),
+        }
+    )
+
+
 async def _list_all_tools(session: ClientSession) -> list[mcp_types.Tool]:
     tools: list[mcp_types.Tool] = []
     cursor: str | None = None
@@ -241,9 +271,9 @@ async def _list_all_tools(session: ClientSession) -> list[mcp_types.Tool]:
         )
         tools.extend(page.tools)
         cursor = page.nextCursor
-        if not cursor:
+        if not cursor or len(tools) >= MAX_TOOLS_PER_SERVER:
             break
-    return tools
+    return [sanitize_tool(t) for t in tools[:MAX_TOOLS_PER_SERVER]]
 
 
 def _leaf(exc: BaseException) -> str:
