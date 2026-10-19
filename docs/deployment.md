@@ -300,11 +300,16 @@ p95 latency `histogram_quantile(0.95, sum by (le, connector) (rate(gateway_tool_
 
 ## 5. Upgrades and rollbacks
 
+Step-by-step procedures for the platform and the store, store backups and restores, and the
+results of a rollback drill under load are in [upgrades.md](upgrades.md). In short:
+
 * Each deploy is a Helm revision. Images are tagged with the commit (`global.imageTag`, or a
   component's `image.tag`; `image.digest` pins by digest), so a revision always maps to exact
   code.
 * Rolling updates use `maxUnavailable: 0, maxSurge: 1`: a new pod must pass readiness before an
-  old one stops, and old pods drain in-flight requests within `terminationGracePeriodSeconds`.
+  old one stops. Old pods first wait `preStopSleepSeconds` (5 s) for endpoint removal to reach
+  Traefik and nginx, then drain in-flight requests within `terminationGracePeriodSeconds`.
+* Upgrades use `--atomic`: a failed rollout or migration returns to the previous revision.
 * Migrations run first and are forward-only. Keep them backward compatible with the previous
   release (add, backfill, then remove in a later release), because the old pods run until the
   rollout finishes and a rollback does not undo a migration.
