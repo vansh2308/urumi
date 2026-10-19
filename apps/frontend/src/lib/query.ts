@@ -34,6 +34,9 @@ export const qk = {
   registry: ["connectors"] as const,
   connector: (id: string) => ["connectors", id] as const,
   hostedSettings: ["hosted-servers", "settings"] as const,
+  oauthConfig: ["oauth", "config"] as const,
+  oauthRequest: (id: string) => ["oauth", "request", id] as const,
+  oauthGrants: ["oauth", "grants"] as const,
   connectorStatus: (teamId: string, registry: boolean) =>
     ["connector-status", teamId, { registry }] as const,
   hosted: ["hosted-servers"] as const,

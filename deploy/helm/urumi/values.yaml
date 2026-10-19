@@ -136,6 +136,10 @@ gateway:
     HOSTED_ALLOWED_IMAGES: >-
       ghcr.io/github/github-mcp-server:*,mcp/duckduckgo:*
     HOSTED_MAX_SERVERS: "10"
+    # OAuth for MCP clients: OAUTH_ISSUER_URL / OAUTH_CONSENT_URL are per environment.
+    OAUTH_ENABLED: "true"
+    OAUTH_ACCESS_TOKEN_TTL_SECONDS: "3600"
+    OAUTH_REFRESH_TOKEN_TTL_DAYS: "30"
   secretEnv:
     - { name: DB_URL, secretName: gateway-secrets }
     - { name: AUTH_TOKEN_PEPPER, secretName: gateway-secrets }

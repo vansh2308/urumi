@@ -28,6 +28,9 @@ from gateway.db.models import (
     AuditEvent,
     AuthSession,
     Invitation,
+    OAuthAuthorizationRequest,
+    OAuthCode,
+    OAuthGrant,
     ToolInvocation,
 )
 from gateway.errors import InvalidInputError, PermissionDeniedError
@@ -310,6 +313,22 @@ class RetentionService:
                         or_(
                             AuthSession.expires_at < sessions_cutoff,
                             AuthSession.revoked_at < sessions_cutoff,
+                        )
+                    ),
+                ),
+                (
+                    "oauth_authorization_requests",
+                    delete(OAuthAuthorizationRequest).where(
+                        OAuthAuthorizationRequest.expires_at < sessions_cutoff
+                    ),
+                ),
+                ("oauth_codes", delete(OAuthCode).where(OAuthCode.expires_at < sessions_cutoff)),
+                (
+                    "oauth_grants",
+                    delete(OAuthGrant).where(
+                        or_(
+                            OAuthGrant.revoked_at < sessions_cutoff,
+                            OAuthGrant.refresh_expires_at < sessions_cutoff,
                         )
                     ),
                 ),

@@ -111,7 +111,9 @@ Register at `https://app.<domain>`, grant yourself platform admin as above, sign
 * Deploy the GitHub and web search servers from their images (see [hosted-mcp.md](hosted-mcp.md)).
 * Enable the servers for your team; invite members.
 
-MCP clients connect to `https://gateway.<domain>/v1/mcp` with a `urk_` key.
+MCP clients connect to `https://gateway.<domain>/v1/mcp`, either with only that URL (OAuth: the
+user approves them at `https://app.<domain>/oauth/consent`; `deploy-vps.sh` sets both URLs from
+`DOMAIN`) or with a `urk_` key. See [oauth.md](oauth.md).
 
 ## 7. Verify
 

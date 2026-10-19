@@ -27,6 +27,11 @@ gateway:
         ports: [{ port: 6443, protocol: TCP }]
   env:
     APP_ENV: local
+    # OAuth issuer = the gateway as MCP clients reach it. Plain HTTP is allowed only because this
+    # local cluster has no TLS (see docs/oauth.md).
+    OAUTH_ISSUER_URL: http://gateway.urumi.local
+    OAUTH_CONSENT_URL: http://urumi.local/oauth/consent
+    OAUTH_ALLOW_HTTP_ISSUER: "true"
     # Trust X-Forwarded-For only from pods (Traefik, the dashboard's nginx): k3s pod CIDR.
     GATEWAY_FORWARDED_ALLOW_IPS: 10.42.0.0/16
   ingress:

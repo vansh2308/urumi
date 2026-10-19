@@ -26,7 +26,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Bumped by every migration; /health/ready fails until the database is at this revision.
-SCHEMA_REVISION = "0007"
+SCHEMA_REVISION = "0008"
 # Own version table so the gateway can share a PostgreSQL database with other services.
 VERSION_TABLE = "gateway_alembic_version"
 
@@ -237,6 +237,81 @@ class ApiKey(Base):
     session_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("auth_sessions.id", ondelete="SET NULL")
     )
+    # Set for an OAuth access token: the grant (client + user + team) it was issued under. It
+    # is replaced on every refresh and revoked with the grant.
+    oauth_grant_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("oauth_grants.id", ondelete="SET NULL")
+    )
+
+
+class OAuthClient(Base):
+    """A dynamically registered OAuth client (RFC 7591), e.g. Claude Code or Cursor."""
+
+    __tablename__ = "oauth_clients"
+
+    client_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    client_name: Mapped[str | None] = mapped_column(String(200))
+    # The registered metadata (redirect URIs, auth method, ...), without the secret.
+    info: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    # Confidential clients only; Fernet-encrypted because the token endpoint compares it.
+    secret_ciphertext: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = _created_at()
+
+
+class OAuthAuthorizationRequest(Base):
+    """An /authorize request waiting for the user's decision on the consent page."""
+
+    __tablename__ = "oauth_authorization_requests"
+
+    request_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    client_id: Mapped[str] = mapped_column(
+        ForeignKey("oauth_clients.client_id", ondelete="CASCADE")
+    )
+    params: Mapped[dict[str, Any]] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = _created_at()
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class OAuthGrant(Base):
+    """A user's consent for one client in one team; holds the (hashed) refresh token."""
+
+    __tablename__ = "oauth_grants"
+    __table_args__ = (Index("ix_oauth_grants_user_id", "user_id"),)
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    client_id: Mapped[str] = mapped_column(
+        ForeignKey("oauth_clients.client_id", ondelete="CASCADE")
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
+    scopes: Mapped[list[str]] = mapped_column(ARRAY(String(32)))
+    resource: Mapped[str | None] = mapped_column(String(500))
+    refresh_token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    refresh_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = _created_at()
+    last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class OAuthCode(Base):
+    """A single-use authorization code (stored hashed), bound to the PKCE challenge."""
+
+    __tablename__ = "oauth_codes"
+
+    code_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    client_id: Mapped[str] = mapped_column(
+        ForeignKey("oauth_clients.client_id", ondelete="CASCADE")
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    team_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("teams.id", ondelete="CASCADE"))
+    scopes: Mapped[list[str]] = mapped_column(ARRAY(String(32)))
+    code_challenge: Mapped[str] = mapped_column(String(128))
+    redirect_uri: Mapped[str] = mapped_column(String(2000))
+    redirect_uri_provided_explicitly: Mapped[bool] = mapped_column(Boolean)
+    resource: Mapped[str | None] = mapped_column(String(500))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ConnectorKind(StrEnum):

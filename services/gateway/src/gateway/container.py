@@ -18,6 +18,7 @@ from gateway.db.engine import Database, create_engine, create_session_factory
 from gateway.hosted.kube import KubeApi, build_kube_http_client
 from gateway.hosted.service import HostedDeployer, HostedServerService
 from gateway.metrics import Metrics
+from gateway.oauth.service import OAuthService
 from gateway.security import PasswordService, TokenHasher
 from gateway.services.activity import ActivityService, RetentionService
 from gateway.services.api_keys import ApiKeyService
@@ -52,6 +53,7 @@ class Container:
     upstream: McpUpstreamClient
     connectors: ConnectorService
     hosted: HostedServerService
+    oauth: OAuthService | None
     tools: ToolService
     activity: ActivityService
     retention: RetentionService
@@ -100,6 +102,20 @@ def build_container(settings: Settings) -> Container:
         deployer=deployer,
     )
     rate_limiter = RateLimiter(db, metrics, enabled=settings.rate_limit.enabled)
+    api_keys = ApiKeyService(db, tokens=tokens, audit=audit, settings=settings.api_keys)
+    oauth = (
+        OAuthService(
+            db,
+            tokens=tokens,
+            api_keys=api_keys,
+            teams=teams,
+            audit=audit,
+            cipher=cipher,
+            settings=settings.oauth,
+        )
+        if settings.oauth.enabled
+        else None
+    )
     return Container(
         settings=settings,
         engine=engine,
@@ -115,7 +131,7 @@ def build_container(settings: Settings) -> Container:
         invitations=InvitationService(
             db, tokens=tokens, teams=teams, auth=auth, audit=audit, settings=settings.auth
         ),
-        api_keys=ApiKeyService(db, tokens=tokens, audit=audit, settings=settings.api_keys),
+        api_keys=api_keys,
         upstream=upstream,
         connectors=connectors,
         hosted=HostedServerService(
@@ -127,6 +143,7 @@ def build_container(settings: Settings) -> Container:
             settings=settings.hosted,
             upstream_settings=settings.upstream,
         ),
+        oauth=oauth,
         tools=ToolService(
             db,
             teams=teams,

@@ -20,6 +20,7 @@ const TeamPage = lazy(() => import("@/pages/team"))
 const ApiKeysPage = lazy(() => import("@/pages/api-keys"))
 const SettingsPage = lazy(() => import("@/pages/settings"))
 const ProfilePage = lazy(() => import("@/pages/profile"))
+const OAuthConsentPage = lazy(() => import("@/pages/oauth-consent"))
 
 function page(node: ReactNode) {
   return (
@@ -50,6 +51,8 @@ export const router = createBrowserRouter([
       {
         element: <RequireTeam />,
         children: [
+          // OAuth consent is a full page (no sidebar): the user arrives from an MCP client.
+          { path: "oauth/consent", element: page(<OAuthConsentPage />) },
           {
             element: <AppShell />,
             children: [

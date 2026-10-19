@@ -9,6 +9,7 @@ import type {
   CatalogEntry,
   Connector,
   ConnectorStatus,
+  ConsentRequest,
   CreateApiKeyRequest,
   DeployHostedServerRequest,
   Grant,
@@ -20,6 +21,8 @@ import type {
   IssuedApiKey,
   IssuedInvitation,
   McpTool,
+  OAuthConfig,
+  OAuthGrant,
   Me,
   Member,
   Page,
@@ -138,6 +141,16 @@ export const gateway = {
       post<IssuedApiKey>(token, `${team(teamId)}/api-keys/${keyId}/rotate`, {
         grace_hours: graceHours,
       }),
+  },
+
+  oauth: {
+    config: () => get<OAuthConfig>(null, "/v1/oauth/config"),
+    request: (token: string, id: string) =>
+      get<ConsentRequest>(token, `/v1/oauth/requests/${encodeURIComponent(id)}`),
+    decide: (token: string, id: string, body: { approve: boolean; team_id?: string }) =>
+      post<{ redirect_to: string }>(token, `/v1/oauth/requests/${encodeURIComponent(id)}/decision`, body),
+    grants: (token: string) => get<OAuthGrant[]>(token, "/v1/oauth/grants"),
+    revokeGrant: (token: string, id: string) => del(token, `/v1/oauth/grants/${id}`),
   },
 
   hosted: {

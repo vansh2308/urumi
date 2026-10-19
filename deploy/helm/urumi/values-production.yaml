@@ -71,6 +71,8 @@ gateway:
   env:
     APP_ENV: production
     GATEWAY_DOCS_ENABLED: "false"
+    OAUTH_ISSUER_URL: https://gateway.example.com
+    OAUTH_CONSENT_URL: https://app.example.com/oauth/consent
     # Traefik's pods (k3s default pod CIDR): the only proxies whose X-Forwarded-For is trusted.
     GATEWAY_FORWARDED_ALLOW_IPS: 10.42.0.0/16
     # Pin hosted images by digest in production, e.g. ghcr.io/github/github-mcp-server@sha256:…

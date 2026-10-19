@@ -27,6 +27,8 @@ helm upgrade --install urumi "${CHART}" -n "${NAMESPACE}" \
   --set agent.image.repository="${REGISTRY}/urumi-agent" \
   --set frontend.image.repository="${REGISTRY}/urumi-frontend" \
   --set woocommerce-mcp.env.WC_BASE_URL="https://shop.${DOMAIN}" \
+  --set gateway.env.OAUTH_ISSUER_URL="https://gateway.${DOMAIN}" \
+  --set gateway.env.OAUTH_CONSENT_URL="https://app.${DOMAIN}/oauth/consent" \
   --set "woocommerce-mcp.hostAliasesFromServices[0].hostnames[0]=shop.${DOMAIN}" \
   --set woocommerce-mcp.hostAliasesFromServices[0].service=traefik \
   --set woocommerce-mcp.hostAliasesFromServices[0].namespace=kube-system \

@@ -261,6 +261,13 @@ avoid throttling). Startup probes cover slow starts, liveness checks only the pr
 readiness checks the database (the MCP server does not check the store, so a store outage does
 not drain every replica).
 
+## OAuth for MCP clients
+
+The gateway is also an OAuth 2.1 authorization server for `/v1/mcp` (MCP authorization spec):
+clients such as Claude Code connect with only the URL and the user approves them on the
+dashboard. Set per environment through `OAUTH_ISSUER_URL` and `OAUTH_CONSENT_URL` (Helm values);
+design, endpoints and client setup are in [oauth.md](oauth.md).
+
 ## Observability
 
 | Question | Where to look |

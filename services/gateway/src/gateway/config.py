@@ -299,6 +299,40 @@ class HostedSettings(BaseSettings):
         return key, value
 
 
+class OAuthSettings(BaseSettings):
+    """OAuth 2.1 for MCP clients (MCP authorization spec): the gateway is the authorization
+    server for its own MCP endpoint. Access tokens are short-lived platform API keys."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="OAUTH_", env_file=_ENV_FILE, extra="ignore", frozen=True
+    )
+
+    enabled: bool = False
+    issuer_url: str = Field(
+        default="",
+        description="The gateway's public base URL as MCP clients reach it, e.g. "
+        "https://gateway.example.com. The authorization server metadata and endpoints live "
+        "under it; the protected resource is <issuer_url>/v1/mcp.",
+    )
+    consent_url: str = Field(
+        default="",
+        description="Dashboard page where a signed-in user approves a client, e.g. "
+        "https://app.example.com/oauth/consent.",
+    )
+    allow_http_issuer: bool = Field(
+        default=False,
+        description="Allow a plain-HTTP issuer other than localhost (local clusters only). OAuth "
+        "requires HTTPS everywhere else.",
+    )
+    access_token_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
+    refresh_token_ttl_days: int = Field(default=30, ge=1, le=365)
+    authorization_request_ttl_seconds: int = Field(default=600, ge=60, le=3600)
+    code_ttl_seconds: int = Field(default=300, ge=30, le=600)
+    requests_per_minute: int = Field(
+        default=30, ge=1, description="Per client IP, on /register, /authorize and /token."
+    )
+
+
 class RetentionSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="RETENTION_", env_file=_ENV_FILE, extra="ignore", frozen=True
@@ -327,6 +361,7 @@ class Settings:
         upstream: UpstreamSettings | None = None,
         retention: RetentionSettings | None = None,
         hosted: HostedSettings | None = None,
+        oauth: OAuthSettings | None = None,
     ) -> None:
         self.app = app or AppSettings()
         self.server = server or ServerSettings()
@@ -337,6 +372,9 @@ class Settings:
         self.upstream = upstream or UpstreamSettings()
         self.retention = retention or RetentionSettings()
         self.hosted = hosted or HostedSettings()
+        self.oauth = oauth or OAuthSettings()
+        if self.oauth.enabled and not (self.oauth.issuer_url and self.oauth.consent_url):
+            raise ValueError("OAUTH_ENABLED needs OAUTH_ISSUER_URL and OAUTH_CONSENT_URL")
         if self.api_keys.default_ttl_days > self.api_keys.max_ttl_days:
             raise ValueError("API_KEY_DEFAULT_TTL_DAYS must not exceed API_KEY_MAX_TTL_DAYS")
         if self.app.app_env is Environment.PRODUCTION and "*" in self.server.cors_allowed_origins:

@@ -23,9 +23,11 @@ import uuid
 from dataclasses import dataclass
 
 from mcp import types as mcp_types
+from mcp.server.auth.routes import build_resource_metadata_url
 from mcp.server.lowlevel import Server
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.shared.exceptions import McpError
+from pydantic import AnyHttpUrl
 from starlette.datastructures import Headers
 from starlette.responses import JSONResponse
 from starlette.types import Receive, Scope, Send
@@ -86,7 +88,7 @@ class McpProxy:
         try:
             principal = await self._authenticate(Headers(scope=scope))
         except AppError as exc:
-            await _error_response(exc)(scope, receive, send)
+            await _error_response(exc, self._challenge)(scope, receive, send)
             return
         assert principal.api_key_team_id is not None  # guaranteed for API keys  # noqa: S101
         scope.setdefault("state", {})[_STATE_KEY] = _ProxyRequest(
@@ -95,6 +97,16 @@ class McpProxy:
             connector_slug=str(slug) if slug is not None else None,
         )
         await self.session_manager.handle_request(scope, receive, send)
+
+    @property
+    def _challenge(self) -> str:
+        """The 401 challenge. With OAuth on, it points MCP clients at the protected resource
+        metadata (RFC 9728), which is how they discover where to sign in."""
+        oauth = self._container.oauth
+        if oauth is None:
+            return "Bearer"
+        metadata = build_resource_metadata_url(AnyHttpUrl(oauth.resource_url))
+        return f'Bearer error="invalid_token", resource_metadata="{metadata}"'
 
     async def _authenticate(self, headers: Headers) -> Principal:
         scheme, _, raw = headers.get("authorization", "").partition(" ")
@@ -192,10 +204,10 @@ def _message(exc: AppError) -> str:
     return f"{exc.code}: {exc.public_message}{suffix}"
 
 
-def _error_response(exc: AppError) -> JSONResponse:
+def _error_response(exc: AppError, challenge: str = "Bearer") -> JSONResponse:
     headers: dict[str, str] = {}
     if exc.status_code == 401:
-        headers["WWW-Authenticate"] = "Bearer"
+        headers["WWW-Authenticate"] = challenge
     if isinstance(exc, RateLimitedError):
         headers["Retry-After"] = str(exc.retry_after_seconds)
     return JSONResponse(

@@ -33,6 +33,7 @@ For a step-by-step manual test, see [POSTMAN.md](POSTMAN.md) and the importable
 | `ugs_` | user session token from `POST /v1/auth/login` | management API, discovery | HMAC-SHA256 |
 | `urk_` | platform API key | discovery (`tools:read`), invocation (`tools:call`), own usage (`usage:read`) | HMAC-SHA256 |
 | `uri_` | invitation token | joining a team once | HMAC-SHA256 |
+| `uoq_` / `uoc_` / `uor_` | OAuth request id / authorization code / refresh token | MCP clients signing in with OAuth ([docs/oauth.md](../../docs/oauth.md)); access tokens are ordinary `urk_` keys that expire in an hour | HMAC-SHA256 |
 
 All three are 256-bit random values shown exactly once; the HMAC uses `AUTH_TOKEN_PEPPER`, so a
 database dump cannot be used to test guesses. Passwords use Argon2id. **Platform API keys are not
@@ -119,6 +120,7 @@ OpenAPI docs are served at `/docs` (`GATEWAY_DOCS_ENABLED`). Errors are always
 | Invitations | `POST/GET /v1/teams/{team_id}/invitations`, `DELETE …/invitations/{id}`, `POST /v1/invitations/accept` |
 | API keys | `POST/GET /v1/teams/{team_id}/api-keys`, `GET …/{key_id}`, `POST …/{key_id}/revoke`, `POST …/{key_id}/rotate` |
 | Registry | `POST/GET /v1/connectors`, `GET/PATCH/DELETE /v1/connectors/{id}`, `POST /v1/connectors/{id}/probe` |
+| OAuth | `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource/v1/mcp`, `/register`, `/authorize`, `/token`, `/revoke` (MCP SDK handlers); `GET /v1/oauth/config`, `GET/POST /v1/oauth/requests/{id}[/decision]`, `GET/DELETE /v1/oauth/grants[/{id}]` |
 | Hosted servers | `GET /v1/hosted-servers/settings`, `POST/GET /v1/hosted-servers`, `GET/PATCH /v1/hosted-servers/{id}`, `POST …/{id}/restart` |
 | Team connectors | `GET /v1/teams/{team_id}/connectors`, `PUT/DELETE …/connectors/{slug}`, `GET …/connectors/{slug}/catalog` |
 | Grants | `GET /v1/teams/{team_id}/members/{user_id}/grants`, `PUT/DELETE …/grants/{slug}` |
