@@ -100,7 +100,8 @@ class ApiKeyService:
             await self._enforce_quota(session, ctx)
             issued = await self._insert(
                 session,
-                ctx,
+                team_id=ctx.team_id,
+                owner_user_id=ctx.principal.user_id,
                 name=spec.name,
                 scopes=spec.scopes,
                 restrictions=restrictions,
@@ -153,7 +154,8 @@ class ApiKeyService:
             ).all()
             issued = await self._insert(
                 session,
-                ctx,
+                team_id=ctx.team_id,
+                owner_user_id=ctx.principal.user_id,
                 name=SESSION_KEY_NAME,
                 scopes=SESSION_KEY_SCOPES,
                 restrictions=None,
@@ -175,6 +177,42 @@ class ApiKeyService:
                 },
             )
         return issued
+
+    async def issue_oauth_key(
+        self,
+        session: AsyncSession,
+        *,
+        grant_id: uuid.UUID,
+        team_id: uuid.UUID,
+        user_id: uuid.UUID,
+        scopes: frozenset[ApiKeyScope],
+        client_name: str,
+        lifetime: timedelta,
+    ) -> IssuedApiKey:
+        """An OAuth access token: a short-lived key for the grant's user and team, replacing
+        the grant's previous one. Runs in the caller's transaction (the token endpoint)."""
+        await self.revoke_grant_keys(session, grant_id, revoked_by=None)
+        return await self._insert(
+            session,
+            team_id=team_id,
+            owner_user_id=user_id,
+            name=f"OAuth: {client_name}"[:100],
+            scopes=scopes,
+            restrictions=None,
+            lifetime=lifetime,
+            rotated_from=None,
+            oauth_grant_id=grant_id,
+        )
+
+    @staticmethod
+    async def revoke_grant_keys(
+        session: AsyncSession, grant_id: uuid.UUID, *, revoked_by: uuid.UUID | None
+    ) -> None:
+        await session.execute(
+            update(ApiKey)
+            .where(ApiKey.oauth_grant_id == grant_id, ApiKey.revoked_at.is_(None))
+            .values(revoked_at=datetime.now(UTC), revoked_by_user_id=revoked_by)
+        )
 
     async def list(
         self, ctx: TeamContext, *, owner_user_id: uuid.UUID | None, include_inactive: bool
@@ -232,7 +270,8 @@ class ApiKeyService:
             lifetime = min(original_lifetime, self._lifetime(ctx.team, None, cap_only=True))
             issued = await self._insert(
                 session,
-                ctx,
+                team_id=ctx.team_id,
+                owner_user_id=ctx.principal.user_id,
                 name=old.name,
                 scopes=frozenset(ApiKeyScope(s) for s in old.scopes),
                 restrictions=tuple(old.tool_restrictions) if old.tool_restrictions else None,
@@ -341,14 +380,16 @@ class ApiKeyService:
     async def _insert(
         self,
         session: AsyncSession,
-        ctx: TeamContext,
         *,
+        team_id: uuid.UUID,
+        owner_user_id: uuid.UUID,
         name: str,
         scopes: frozenset[ApiKeyScope],
         restrictions: tuple[str, ...] | None,
         lifetime: timedelta,
         rotated_from: uuid.UUID | None,
         session_id: uuid.UUID | None = None,
+        oauth_grant_id: uuid.UUID | None = None,
     ) -> IssuedApiKey:
         if not scopes:
             raise InvalidInputError("At least one scope is required.")
@@ -356,18 +397,19 @@ class ApiKeyService:
         now = datetime.now(UTC)
         key = ApiKey(
             id=uuid.uuid4(),
-            team_id=ctx.team_id,
-            owner_user_id=ctx.principal.user_id,
+            team_id=team_id,
+            owner_user_id=owner_user_id,
             name=name.strip(),
             prefix=issued.display_prefix,
             key_hash=issued.digest,
             scopes=sorted(s.value for s in scopes),
             tool_restrictions=list(restrictions) if restrictions is not None else None,
-            created_by_user_id=ctx.principal.user_id,
+            created_by_user_id=owner_user_id,
             created_at=now,
             expires_at=now + lifetime,
             rotated_from_id=rotated_from,
             session_id=session_id,
+            oauth_grant_id=oauth_grant_id,
         )
         session.add(key)
         await session.flush()

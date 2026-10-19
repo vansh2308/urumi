@@ -32,6 +32,9 @@ class TokenKind(StrEnum):
     SESSION = "ugs_"
     API_KEY = "urk_"
     INVITATION = "uri_"
+    OAUTH_REQUEST = "uoq_"  # pending authorization request, carried through the consent page
+    OAUTH_CODE = "uoc_"  # authorization code (single use, minutes)
+    OAUTH_REFRESH = "uor_"  # refresh token (rotated on every use)
 
 
 _TOKEN_BYTES = 32
