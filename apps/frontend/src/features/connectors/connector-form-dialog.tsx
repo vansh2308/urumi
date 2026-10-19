@@ -16,6 +16,13 @@ import {
 } from "@/components/ui/dialog"
 import { FieldGroup } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
+import {
+  credentialDefaults,
+  credentialSchema,
+  refineCredential,
+  toCredential,
+} from "@/features/connectors/credential"
+import { CredentialFields } from "@/features/connectors/credential-fields"
 import { useRegisterConnector, useUpdateConnector } from "@/hooks/queries/use-connectors"
 import { errorMessage } from "@/lib/api/http"
 import type { Connector } from "@/lib/api/types"
@@ -25,7 +32,8 @@ const optionalNumber = z
   .trim()
   .refine((v) => v === "" || (!Number.isNaN(Number(v)) && Number(v) > 0), "Enter a positive number.")
 
-const schema = z.object({
+const schema = credentialSchema
+  .extend({
   slug: z
     .string()
     .trim()
@@ -35,7 +43,8 @@ const schema = z.object({
   url: z.url("Enter the server's Streamable HTTP URL, e.g. http://127.0.0.1:8000/mcp").max(500),
   timeout_seconds: optionalNumber,
   max_concurrency: optionalNumber.refine((v) => v === "" || Number.isInteger(Number(v)), "Whole number."),
-})
+  })
+  .superRefine(refineCredential)
 type Values = z.infer<typeof schema>
 
 /** Register (platform admin) or edit a connector in the gateway's registry. */
@@ -62,6 +71,7 @@ export function ConnectorFormDialog({
         url: connector?.url ?? "",
         timeout_seconds: connector?.timeout_seconds?.toString() ?? "",
         max_concurrency: connector?.max_concurrency?.toString() ?? "",
+        ...credentialDefaults(connector?.credential),
       })
     }
   }, [open, connector, form])
@@ -74,6 +84,7 @@ export function ConnectorFormDialog({
       url: v.url,
       timeout_seconds: v.timeout_seconds ? Number(v.timeout_seconds) : undefined,
       max_concurrency: v.max_concurrency ? Number(v.max_concurrency) : undefined,
+      credential: toCredential(v),
     }
     const done = {
       onSuccess: (c: Connector) => {
@@ -82,7 +93,21 @@ export function ConnectorFormDialog({
       },
       onError: (e: unknown) => toast.error(errorMessage(e)),
     }
-    if (connector) update.mutate({ id: connector.id, body }, done)
+    if (connector) {
+      const { url, ...rest } = body
+      update.mutate(
+        {
+          id: connector.id,
+          // A hosted server's URL is managed by the platform.
+          body: {
+            ...rest,
+            ...(connector.kind === "hosted" ? {} : { url }),
+            clear_credential: v.credential_mode === "clear" || undefined,
+          },
+        },
+        done
+      )
+    }
     else register.mutate({ slug: v.slug, ...body }, done)
   })
 
@@ -113,7 +138,12 @@ export function ConnectorFormDialog({
               name="url"
               label="Endpoint URL"
               placeholder="http://127.0.0.1:8000/mcp"
+              disabled={connector?.kind === "hosted"}
+              description={
+                connector?.kind === "hosted" ? "Managed by the platform for hosted servers." : undefined
+              }
             />
+            <CredentialFields control={form.control} existing={connector?.credential} />
             <div className="grid gap-4 sm:grid-cols-2">
               <TextField
                 control={form.control}

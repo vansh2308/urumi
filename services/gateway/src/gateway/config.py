@@ -196,10 +196,21 @@ class UpstreamSettings(BaseSettings):
         default="auto",
         description="'ipv4' avoids the macOS IPv6 mDNS stall for *.local upstream names.",
     )
+    credential_keys: Annotated[list[SecretStr], NoDecode] = Field(
+        default_factory=list,
+        description="Fernet keys (comma separated) that encrypt connector credentials at rest. "
+        "The first encrypts, all decrypt. Generate one with `poetry run gateway-admin "
+        "generate-credential-key`. Empty disables connector credentials.",
+    )
 
     @field_validator("allowed_hosts", mode="before")
     @classmethod
     def _split_hosts(cls, value: object) -> object:
+        return _split_csv(value)
+
+    @field_validator("credential_keys", mode="before")
+    @classmethod
+    def _split_keys(cls, value: object) -> object:
         return _split_csv(value)
 
     def is_allowed_url(self, url: str) -> bool:
@@ -212,6 +223,57 @@ class UpstreamSettings(BaseSettings):
         host = parts.hostname.lower()
         target = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
         return any(fnmatch.fnmatchcase(target, pattern.lower()) for pattern in self.allowed_hosts)
+
+
+class HostedSettings(BaseSettings):
+    """Hosted MCP servers: images the gateway deploys into the cluster on an admin's request."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="HOSTED_", env_file=_ENV_FILE, extra="ignore", frozen=True
+    )
+
+    enabled: bool = Field(
+        default=False,
+        description="Allow platform admins to deploy MCP servers from container images. Needs "
+        "the gateway to run in the cluster with a ServiceAccount allowed to manage Deployments, "
+        "Services, Secrets and NetworkPolicies in HOSTED_NAMESPACE.",
+    )
+    namespace: str = Field(default="urumi-mcp", pattern=r"^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$")
+    allowed_images: Annotated[list[str], NoDecode] = Field(
+        default_factory=list,
+        description="Image patterns (fnmatch, comma separated) admins may deploy, e.g. "
+        "'ghcr.io/github/github-mcp-server:*,mcp/duckduckgo:*'. Empty allows none.",
+    )
+    gateway_namespace: str = Field(
+        default="urumi", description="Namespace of the gateway pods (NetworkPolicy ingress)."
+    )
+    gateway_pod_label: str = Field(
+        default="app.kubernetes.io/name=gateway",
+        pattern=r"^[A-Za-z0-9./_-]+=[A-Za-z0-9._-]+$",
+        description="key=value label of the gateway pods; only they may reach hosted servers.",
+    )
+    run_as_user: int = Field(default=65532, ge=1, description="Non-root UID for hosted pods.")
+    default_cpu_millicores: int = Field(default=250, ge=10)
+    max_cpu_millicores: int = Field(default=1000, ge=10)
+    default_memory_mib: int = Field(default=256, ge=32)
+    max_memory_mib: int = Field(default=1024, ge=32)
+    max_servers: int = Field(default=10, ge=1)
+    api_url: str = Field(default="https://kubernetes.default.svc")
+    service_account_dir: str = Field(default="/var/run/secrets/kubernetes.io/serviceaccount")
+    request_timeout_seconds: float = Field(default=10.0, gt=0)
+
+    @field_validator("allowed_images", mode="before")
+    @classmethod
+    def _split_images(cls, value: object) -> object:
+        return _split_csv(value)
+
+    def is_allowed_image(self, image: str) -> bool:
+        return any(fnmatch.fnmatchcase(image, pattern) for pattern in self.allowed_images)
+
+    @property
+    def gateway_pod_selector(self) -> tuple[str, str]:
+        key, _, value = self.gateway_pod_label.partition("=")
+        return key, value
 
 
 class RetentionSettings(BaseSettings):
@@ -241,6 +303,7 @@ class Settings:
         rate_limit: RateLimitSettings | None = None,
         upstream: UpstreamSettings | None = None,
         retention: RetentionSettings | None = None,
+        hosted: HostedSettings | None = None,
     ) -> None:
         self.app = app or AppSettings()
         self.server = server or ServerSettings()
@@ -250,6 +313,7 @@ class Settings:
         self.rate_limit = rate_limit or RateLimitSettings()
         self.upstream = upstream or UpstreamSettings()
         self.retention = retention or RetentionSettings()
+        self.hosted = hosted or HostedSettings()
         if self.api_keys.default_ttl_days > self.api_keys.max_ttl_days:
             raise ValueError("API_KEY_DEFAULT_TTL_DAYS must not exceed API_KEY_MAX_TTL_DAYS")
         if self.app.app_env is Environment.PRODUCTION and "*" in self.server.cors_allowed_origins:

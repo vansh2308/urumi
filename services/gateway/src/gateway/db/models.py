@@ -17,6 +17,7 @@ from sqlalchemy import (
     Integer,
     MetaData,
     String,
+    Text,
     UniqueConstraint,
     func,
     text,
@@ -25,7 +26,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Bumped by every migration; /health/ready fails until the database is at this revision.
-SCHEMA_REVISION = "0004"
+SCHEMA_REVISION = "0006"
 # Own version table so the gateway can share a PostgreSQL database with other services.
 VERSION_TABLE = "gateway_alembic_version"
 
@@ -233,6 +234,11 @@ class ApiKey(Base):
     )
 
 
+class ConnectorKind(StrEnum):
+    REMOTE = "remote"
+    HOSTED = "hosted"
+
+
 class Connector(Base):
     """A registered upstream MCP server. Managed by platform admins only.
 
@@ -247,12 +253,44 @@ class Connector(Base):
     display_name: Mapped[str] = mapped_column(String(100))
     description: Mapped[str] = mapped_column(String(500), default="")
     url: Mapped[str] = mapped_column(String(500))
+    # 'remote': registered by URL. 'hosted': deployed by the gateway from a container image;
+    # its URL is the in-cluster Service and is managed by the platform (see HostedServer).
+    kind: Mapped[str] = mapped_column(String(16), default=ConnectorKind.REMOTE.value)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Optional static credential sent as one header on every upstream call. The value is
+    # encrypted (see gateway.upstream.credentials) and never leaves the gateway.
+    credential_header: Mapped[str | None] = mapped_column(String(64))
+    credential_ciphertext: Mapped[str | None] = mapped_column(Text)
     timeout_seconds: Mapped[float] = mapped_column(Float)
     max_concurrency: Mapped[int] = mapped_column(Integer)
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
+    created_at: Mapped[datetime] = _created_at()
+    updated_at: Mapped[datetime] = _created_at()
+
+
+class HostedServer(Base):
+    """Deployment spec of a hosted connector. Secret values are not here: they live only in the
+    server's Kubernetes Secret; this row records their names."""
+
+    __tablename__ = "hosted_servers"
+
+    connector_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("connectors.id", ondelete="CASCADE"), primary_key=True
+    )
+    k8s_name: Mapped[str] = mapped_column(String(63), unique=True)
+    namespace: Mapped[str] = mapped_column(String(63))
+    image: Mapped[str] = mapped_column(String(300))
+    port: Mapped[int] = mapped_column(Integer)
+    path: Mapped[str] = mapped_column(String(200))
+    args: Mapped[list[str]] = mapped_column(ARRAY(String(500)), default=list)
+    env: Mapped[dict[str, str]] = mapped_column(JSONB, default=dict)
+    secret_keys: Mapped[list[str]] = mapped_column(ARRAY(String(128)), default=list)
+    cpu_millicores: Mapped[int] = mapped_column(Integer)
+    memory_mib: Mapped[int] = mapped_column(Integer)
+    egress: Mapped[str] = mapped_column(String(16))
+    config_revision: Mapped[str] = mapped_column(String(32))
     created_at: Mapped[datetime] = _created_at()
     updated_at: Mapped[datetime] = _created_at()
 

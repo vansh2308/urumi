@@ -2,11 +2,13 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 
 import { gateway } from "@/lib/api/gateway"
 import type {
+  DeployHostedServerRequest,
   McpTool,
   RegisterConnectorRequest,
   TeamConnector,
   ToolSet,
   UpdateConnectorRequest,
+  UpdateHostedServerRequest,
 } from "@/lib/api/types"
 import { sessionToken } from "@/lib/auth/store"
 import { qk } from "@/lib/query"
@@ -36,6 +38,19 @@ export function useUpdateConnector() {
       gateway.connectors.update(sessionToken(), id, body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qk.registry })
+      void queryClient.invalidateQueries({ queryKey: qk.hosted })
+      void queryClient.invalidateQueries({ queryKey: ["teams"] })
+    },
+  })
+}
+
+export function useRemoveConnector() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => gateway.connectors.remove(sessionToken(), id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.registry })
+      void queryClient.invalidateQueries({ queryKey: qk.hosted })
       void queryClient.invalidateQueries({ queryKey: ["teams"] })
     },
   })
@@ -44,6 +59,62 @@ export function useUpdateConnector() {
 export function useProbeConnector() {
   return useMutation({
     mutationFn: (id: string) => gateway.connectors.probe(sessionToken(), id),
+  })
+}
+
+// --- hosted MCP servers (platform admins) --------------------------------------------------------
+
+export function useHostedSettings(enabled: boolean) {
+  return useQuery({
+    queryKey: qk.hostedSettings,
+    queryFn: () => gateway.hosted.settings(sessionToken()),
+    enabled,
+    staleTime: 5 * 60_000,
+  })
+}
+
+/** Hosted servers with live cluster status; polls while any of them is still deploying. */
+export function useHostedServers(enabled: boolean) {
+  return useQuery({
+    queryKey: qk.hosted,
+    queryFn: () => gateway.hosted.list(sessionToken()),
+    enabled,
+    refetchInterval: (q) =>
+      q.state.data?.some((h) => h.status.phase === "deploying") ? 3000 : false,
+  })
+}
+
+function useInvalidateHosted() {
+  const queryClient = useQueryClient()
+  return () => {
+    void queryClient.invalidateQueries({ queryKey: qk.hosted })
+    void queryClient.invalidateQueries({ queryKey: qk.registry })
+    void queryClient.invalidateQueries({ queryKey: ["teams"] })
+  }
+}
+
+export function useDeployHosted() {
+  const invalidate = useInvalidateHosted()
+  return useMutation({
+    mutationFn: (body: DeployHostedServerRequest) => gateway.hosted.deploy(sessionToken(), body),
+    onSuccess: invalidate,
+  })
+}
+
+export function useUpdateHosted() {
+  const invalidate = useInvalidateHosted()
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: UpdateHostedServerRequest }) =>
+      gateway.hosted.update(sessionToken(), id, body),
+    onSuccess: invalidate,
+  })
+}
+
+export function useRestartHosted() {
+  const invalidate = useInvalidateHosted()
+  return useMutation({
+    mutationFn: (id: string) => gateway.hosted.restart(sessionToken(), id),
+    onSuccess: invalidate,
   })
 }
 

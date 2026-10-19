@@ -11,6 +11,12 @@ Urumi {{ .Chart.AppVersion }} deployed to namespace {{ .Release.Namespace }} (re
 {{- end }}
 {{- end }}
 
+{{- if .Values.hostedMcp.enabled }}
+
+Hosted MCP servers (deployed by the gateway) run in namespace {{ .Values.hostedMcp.namespace }}:
+  kubectl -n {{ .Values.hostedMcp.namespace }} get deploy,pods,svc,networkpolicy,secret
+{{- end }}
+
 Roll back: helm rollback {{ .Release.Name }} <revision> -n {{ .Release.Namespace }}
 Remove:    helm uninstall {{ .Release.Name }} -n {{ .Release.Namespace }}
            (stateless services only; the store release, its PVCs and the Secrets are untouched)

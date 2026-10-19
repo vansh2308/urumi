@@ -29,7 +29,8 @@ import pytest
 import uvicorn
 from alembic import command
 from alembic.config import Config
-from mcp.server.fastmcp import FastMCP
+from cryptography.fernet import Fernet
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 
 from gateway.app import create_app
@@ -140,6 +141,12 @@ def _demo_server(port: int) -> FastMCP[Any]:
         """Always fails."""
         raise ToolError("boom")
 
+    @mcp.tool()
+    def seen_token(ctx: Context[Any, Any, Any]) -> str:
+        """The X-Upstream-Token header this server received (to test connector credentials)."""
+        request = ctx.request_context.request
+        return request.headers.get("x-upstream-token", "") if request is not None else ""
+
     return mcp
 
 
@@ -190,6 +197,7 @@ def make_settings(dsn: str) -> Settings:
             allow_insecure_http=True,
             default_call_timeout_seconds=5,
             tool_cache_ttl_seconds=0,
+            credential_keys=[Fernet.generate_key().decode()],
         ),
         retention=RetentionSettings(_env_file=None, purge_interval_seconds=0),
     )

@@ -1,5 +1,5 @@
 import type { ColumnDef } from "@tanstack/react-table"
-import { MoreHorizontalIcon, PlusIcon, RefreshCwIcon } from "lucide-react"
+import { ChevronDownIcon, MoreHorizontalIcon, PlusIcon, RefreshCwIcon } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router"
 import { toast } from "sonner"
@@ -20,18 +20,26 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { describeAccess } from "@/features/connectors/access"
 import { ConnectorFormDialog } from "@/features/connectors/connector-form-dialog"
+import { HostedServerDialog } from "@/features/connectors/hosted-server-dialog"
 import { TeamPolicyDialog } from "@/features/connectors/team-policy-dialog"
 import { useConnectorActions } from "@/features/connectors/use-connector-actions"
-import { useAllTools, useProbeConnector, useRegistry } from "@/hooks/queries/use-connectors"
+import {
+  useAllTools,
+  useHostedServers,
+  useHostedSettings,
+  useProbeConnector,
+  useRegistry,
+} from "@/hooks/queries/use-connectors"
 import { useTeamId, useWorkspace } from "@/hooks/queries/use-session"
 import { errorMessage } from "@/lib/api/http"
-import type { Connector, TeamConnector } from "@/lib/api/types"
+import type { Connector, HostedServer, TeamConnector } from "@/lib/api/types"
 
 export interface ServerRow {
   slug: string
   displayName: string
   description: string
   registry: Connector | null
+  hosted: HostedServer | null
   team: TeamConnector | null
   health: "reachable" | "unreachable" | "unknown"
   toolCount: number | null
@@ -42,22 +50,27 @@ export default function McpServersPage() {
   const { isTeamAdmin, isPlatformAdmin } = useWorkspace()
   const navigate = useNavigate()
   const registry = useRegistry()
+  const hostedSettings = useHostedSettings(isPlatformAdmin)
+  const hosted = useHostedServers(isPlatformAdmin && hostedSettings.data?.enabled === true)
   const catalog = useAllTools(teamId)
   const probe = useProbeConnector()
   const actions = useConnectorActions(teamId)
   const [registering, setRegistering] = useState(false)
+  const [deploying, setDeploying] = useState(false)
   const [editing, setEditing] = useState<Connector | null>(null)
   const [policyFor, setPolicyFor] = useState<ServerRow | null>(null)
 
   const rows = useMemo<ServerRow[]>(() => {
     const team = catalog.connectors.data ?? []
     const bySlug = new Map<string, ServerRow>()
+    const hostedById = new Map((hosted.data ?? []).map((h) => [h.connector.id, h]))
     for (const c of registry.data ?? []) {
       bySlug.set(c.slug, {
         slug: c.slug,
         displayName: c.display_name,
         description: c.description,
         registry: c,
+        hosted: hostedById.get(c.id) ?? null,
         team: null,
         health: "unknown",
         toolCount: null,
@@ -73,6 +86,7 @@ export default function McpServersPage() {
         displayName: t.display_name,
         description: t.description,
         registry: row?.registry ?? null,
+        hosted: row?.hosted ?? null,
         team: t,
         health: failed ? "unreachable" : known ? "reachable" : "unknown",
         toolCount: known && !failed ? tools.length : null,
@@ -80,7 +94,7 @@ export default function McpServersPage() {
       bySlug.set(t.slug, merged)
     }
     return [...bySlug.values()]
-  }, [registry.data, catalog.connectors.data, catalog.failed, catalog.tools])
+  }, [registry.data, hosted.data, catalog.connectors.data, catalog.failed, catalog.tools])
 
   const runProbe = (c: Connector) =>
     probe.mutate(c.id, {
@@ -156,6 +170,21 @@ export default function McpServersPage() {
     ...(isPlatformAdmin
       ? [
           {
+            id: "type",
+            accessorFn: (r: ServerRow) => r.registry?.kind ?? "remote",
+            header: "Type",
+            cell: ({ row }) => {
+              const h = row.original.hosted
+              if (row.original.registry?.kind !== "hosted") return <span className="text-muted-foreground">URL</span>
+              return (
+                <span className="inline-flex items-center gap-2">
+                  Hosted
+                  {h && <StatusBadge status={h.status.phase} />}
+                </span>
+              )
+            },
+          } satisfies ColumnDef<ServerRow, unknown>,
+          {
             id: "endpoint",
             accessorFn: (r: ServerRow) => r.registry?.url ?? "",
             header: "Endpoint",
@@ -219,6 +248,9 @@ export default function McpServersPage() {
                     >
                       {r.registry.enabled ? "Disable" : "Enable"}
                     </DropdownMenuItem>
+                    <DropdownMenuItem variant="destructive" onClick={() => actions.deleteServer(r.registry!)}>
+                      Delete server
+                    </DropdownMenuItem>
                   </>
                 )}
               </DropdownMenuContent>
@@ -247,9 +279,22 @@ export default function McpServersPage() {
               <RefreshCwIcon /> Refresh
             </Button>
             {isPlatformAdmin && (
-              <Button size="sm" onClick={() => setRegistering(true)}>
-                <PlusIcon /> Register server
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button size="sm">
+                    <PlusIcon /> Add server <ChevronDownIcon />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setRegistering(true)}>Register by URL</DropdownMenuItem>
+                  <DropdownMenuItem
+                    disabled={!hostedSettings.data?.enabled}
+                    onClick={() => setDeploying(true)}
+                  >
+                    Deploy from container image
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
           </>
         }
@@ -275,6 +320,11 @@ export default function McpServersPage() {
       {isPlatformAdmin && (
         <>
           <ConnectorFormDialog open={registering} onOpenChange={setRegistering} />
+          <HostedServerDialog
+            open={deploying}
+            onOpenChange={setDeploying}
+            onDeployed={(h) => navigate(`/mcp-servers/${h.connector.slug}`)}
+          />
           <ConnectorFormDialog
             open={editing !== null}
             onOpenChange={(o) => !o && setEditing(null)}

@@ -7,11 +7,14 @@
 #
 # Secrets (keys):
 #   woocommerce-mcp-secrets  WC_CONSUMER_KEY, WC_CONSUMER_SECRET, DB_URL
-#   gateway-secrets          DB_URL, AUTH_TOKEN_PEPPER
+#   gateway-secrets          DB_URL, AUTH_TOKEN_PEPPER, UPSTREAM_CREDENTIAL_KEYS
 #   agent-secrets            DB_URL, GEMINI_API_KEY
 #
-# The gateway pepper must match the one used to create existing sessions and API keys, so it is
-# copied from services/gateway/.env rather than generated.
+# The gateway pepper must match the one used to create existing sessions and API keys, and the
+# credential key the one that encrypted stored connector credentials, so both are copied from
+# services/gateway/.env rather than generated. Create a credential key once with
+#   (cd services/gateway && poetry run gateway-admin generate-credential-key)
+# and put it in that .env as UPSTREAM_CREDENTIAL_KEYS=...
 set -euo pipefail
 
 NAMESPACE="${1:-urumi}"
@@ -54,5 +57,6 @@ apply_secret() {
 kubectl get namespace "${NAMESPACE}" >/dev/null
 apply_secret woocommerce-mcp-secrets "${ROOT}/services/woocommerce-mcp/.env" \
   WC_CONSUMER_KEY WC_CONSUMER_SECRET DB_URL
-apply_secret gateway-secrets "${ROOT}/services/gateway/.env" DB_URL AUTH_TOKEN_PEPPER
+apply_secret gateway-secrets "${ROOT}/services/gateway/.env" \
+  DB_URL AUTH_TOKEN_PEPPER UPSTREAM_CREDENTIAL_KEYS
 apply_secret agent-secrets "${ROOT}/services/agent/.env" DB_URL GEMINI_API_KEY
