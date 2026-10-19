@@ -39,6 +39,12 @@ database dump cannot be used to test guesses. Passwords use Argon2id. **Platform
 WooCommerce keys**: the gateway never sees, stores or forwards the store's `ck_`/`cs_`
 credentials, which stay inside `woocommerce-mcp`.
 
+**Connector credentials** are the other direction: an optional static header (bearer token or
+custom header) the gateway sends to one upstream, e.g. a GitHub token. They are encrypted at rest
+with `UPSTREAM_CREDENTIAL_KEYS` (Fernet), sent only to that connector's own origin, and never
+returned or logged; the API shows the header name only. See
+[docs/hosted-mcp.md](../../docs/hosted-mcp.md).
+
 API keys cannot reach management endpoints (teams, members, keys, policies, audit); those need a
 user session. Tool invocation needs an API key, so every call is attributable to a named,
 revocable key.
@@ -66,7 +72,9 @@ revocable key.
 
 Clients name a connector by **slug**; the gateway looks up its URL in the registry. URLs are set
 only by platform admins and must match `UPSTREAM_ALLOWED_HOSTS` (`host:port` patterns), and
-redirects are never followed, so the gateway cannot be pointed at arbitrary hosts.
+redirects are never followed, so the gateway cannot be pointed at arbitrary hosts. Hosted servers
+(deployed from an allow-listed image with `POST /v1/hosted-servers`) get a URL the gateway builds
+from their in-cluster Service, which cannot be edited.
 
 Calls go through the official MCP SDK client over Streamable HTTP on a shared connection pool,
 with per-connector deadlines (`timeout_seconds`), a per-connector concurrency limit per replica
@@ -98,7 +106,8 @@ OpenAPI docs are served at `/docs` (`GATEWAY_DOCS_ENABLED`). Errors are always
 | Members | `GET /v1/teams/{team_id}/members`, `PATCH/DELETE /v1/teams/{team_id}/members/{user_id}` |
 | Invitations | `POST/GET /v1/teams/{team_id}/invitations`, `DELETE …/invitations/{id}`, `POST /v1/invitations/accept` |
 | API keys | `POST/GET /v1/teams/{team_id}/api-keys`, `GET …/{key_id}`, `POST …/{key_id}/revoke`, `POST …/{key_id}/rotate` |
-| Registry | `POST/GET /v1/connectors`, `GET/PATCH /v1/connectors/{id}`, `POST /v1/connectors/{id}/probe` |
+| Registry | `POST/GET /v1/connectors`, `GET/PATCH/DELETE /v1/connectors/{id}`, `POST /v1/connectors/{id}/probe` |
+| Hosted servers | `GET /v1/hosted-servers/settings`, `POST/GET /v1/hosted-servers`, `GET/PATCH /v1/hosted-servers/{id}`, `POST …/{id}/restart` |
 | Team connectors | `GET /v1/teams/{team_id}/connectors`, `PUT/DELETE …/connectors/{slug}`, `GET …/connectors/{slug}/catalog` |
 | Grants | `GET /v1/teams/{team_id}/members/{user_id}/grants`, `PUT/DELETE …/grants/{slug}` |
 | Tools | `GET /v1/teams/{team_id}/connectors/{slug}/tools`, `POST …/tools/{tool}/call`, `/v1/mcp/{slug}` |

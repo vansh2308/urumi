@@ -60,6 +60,22 @@ To run the collection again from scratch, change `adminEmail`/`memberEmail` (acc
 are unique) or recreate the gateway database. If you rerun folder 2 against the same database,
 *Register woocommerce connector* returns 409; set `connectorId` from *List connectors*.
 
+## Hosted servers and connector credentials
+
+These need the gateway running in the cluster (`{{baseUrl}}` = `http://gateway.urumi.local`), and
+the `adminToken` of a platform admin. Add them as requests in a new folder:
+
+| Request | Body / note |
+| --- | --- |
+| `GET /v1/hosted-servers/settings` | allowed images, limits, namespace |
+| `POST /v1/hosted-servers` | the `web-search` or `github` body from [docs/hosted-mcp.md](../../docs/hosted-mcp.md); returns `status.phase: deploying` |
+| `GET /v1/hosted-servers` | repeat until `status.phase` is `ready` |
+| `POST /v1/connectors/{{id}}/probe` | lists the tools; GitHub without a token answers `upstream_unauthorized` |
+| `PATCH /v1/connectors/{{id}}` | `{"credential": {"type": "bearer", "value": "<token>"}}` sets it; the response shows only `credential.header_name` |
+| `PATCH /v1/connectors/{{id}}` | `{"enabled": false}` scales the pod to 0 and hides its tools |
+| `PUT /v1/teams/{{teamId}}/connectors/web-search` | `{"allow_all_tools": true}`, then call `search` like any tool |
+| `DELETE /v1/connectors/{{id}}` | 204; `kubectl -n urumi-mcp get all` shows the objects are gone |
+
 ## Calling the MCP endpoint yourself
 
 `/v1/mcp/{connector}` is a stateless MCP Streamable HTTP server. Raw requests need:

@@ -14,6 +14,11 @@ anything below.
 | Agent | `urumi/agent` | 8201 | `agent.urumi.svc.cluster.local` | `http://agent.urumi.local` |
 | Dashboard (nginx) | `urumi/frontend` | 8080 | `frontend.urumi.svc.cluster.local` | `http://urumi.local` |
 | Store (release `store`) | Bitnami WordPress | 80 | `store-wordpress.urumi.svc.cluster.local` | `http://wordpress.local` |
+| Hosted MCP servers | admin-chosen (e.g. `mcp/duckduckgo`, `ghcr.io/github/github-mcp-server`) | per server | `mcp-<slug>.urumi-mcp.svc.cluster.local` | never: only the gateway may connect |
+
+Hosted MCP servers are deployed and removed by the gateway itself, in their own `urumi-mcp`
+namespace; see [hosted-mcp.md](hosted-mcp.md) for the design, the security controls and how the
+GitHub and web search servers are connected.
 
 ```
 browser ──► Traefik ──► frontend (nginx) ──/api/gateway──► gateway ──► woocommerce-mcp ──► store-wordpress
@@ -40,7 +45,7 @@ docker run -d --rm --name urumi-test-postgres -e POSTGRES_PASSWORD=postgres \
 export TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55432/postgres
 
 (cd services/woocommerce-mcp && poetry run pytest)   # 33 tests
-(cd services/gateway && poetry run pytest)           # 39 tests
+(cd services/gateway && poetry run pytest)           # 47 tests
 (cd services/agent && poetry run pytest)             # 14 tests
 (cd apps/frontend && npm test)                       # 10 tests
 
@@ -106,11 +111,14 @@ docker run --rm -e DB_URL='postgresql://…' --entrypoint alembic urumi/gateway:
    | Secret | Keys |
    | --- | --- |
    | `woocommerce-mcp-secrets` | `WC_CONSUMER_KEY`, `WC_CONSUMER_SECRET`, `DB_URL` |
-   | `gateway-secrets` | `DB_URL`, `AUTH_TOKEN_PEPPER` |
+   | `gateway-secrets` | `DB_URL`, `AUTH_TOKEN_PEPPER`, `UPSTREAM_CREDENTIAL_KEYS` |
    | `agent-secrets` | `DB_URL`, `GEMINI_API_KEY` |
 
    The gateway pepper is copied, not generated, because existing sessions and API keys are
-   hashed with it. Re-run the script after changing a `.env`, then restart the affected
+   hashed with it. `UPSTREAM_CREDENTIAL_KEYS` (encrypts connector credentials) is copied for the
+   same reason: the host and cluster gateways share one database. Create it once with
+   `(cd services/gateway && poetry run gateway-admin generate-credential-key)` and add it to
+   `services/gateway/.env`. Re-run the script after changing a `.env`, then restart the affected
    deployment (`kubectl -n urumi rollout restart deploy/gateway`).
 
 ### Deploy or upgrade
@@ -222,6 +230,7 @@ responses, so any replica can serve any request without sticky sessions.
 | Pod | Accepts traffic from |
 | --- | --- |
 | woocommerce-mcp | gateway pods |
+| hosted MCP servers (`urumi-mcp`) | gateway pods; everything else is denied by a namespace default-deny policy, and their egress is limited to DNS and public addresses |
 | gateway | Traefik, dashboard, agent |
 | agent | Traefik, dashboard |
 | frontend | Traefik |
@@ -229,8 +238,10 @@ responses, so any replica can serve any request without sticky sessions.
 Egress is not restricted, because the services call Neon and Gemini on the internet. To lock it
 down, add `networkPolicy.egress` rules with DNS plus your database and provider CIDRs.
 
-**ServiceAccounts**: one per service with no API token mounted and no RBAC bindings, because
-none of the services calls the Kubernetes API.
+**ServiceAccounts**: one per service. Only the gateway mounts its token, and its only RBAC is a
+Role in `urumi-mcp` (manage Deployments, Services, Secrets, NetworkPolicies; read Pods) for
+hosted MCP servers. It has no rights in `urumi` or cluster-wide. The other services mount no
+token and have no bindings.
 
 **Ingress**: Traefik (`className: traefik`). The agent streams answers as server-sent events;
 Traefik flushes them as they arrive and the dashboard's nginx has buffering disabled for
@@ -263,7 +274,10 @@ helm -n urumi uninstall urumi
 ```
 
 This removes only the four Deployments, their Services, ConfigMaps, Ingresses,
-NetworkPolicies and ServiceAccounts. It does not touch the `store` release, the WordPress or
+NetworkPolicies and ServiceAccounts, plus the gateway's Role, the quota and the default-deny
+policy in `urumi-mcp`. The `urumi-mcp` namespace itself is kept, with any hosted servers in it:
+delete hosted servers from the dashboard (or `DELETE /v1/connectors/{id}`) before uninstalling,
+which removes their Deployment, Service, Secret and NetworkPolicy. It does not touch the `store` release, the WordPress or
 MariaDB volumes, or the three Secrets (delete those explicitly if wanted:
 `kubectl -n urumi delete secret woocommerce-mcp-secrets gateway-secrets agent-secrets`).
 
@@ -295,8 +309,10 @@ WordPress volume survive an uninstall too, the store values example sets
 4. Deploy the store with a real domain over HTTPS (`wordpressHost`, `wordpressScheme: https`,
    ingress TLS), and create WooCommerce REST API keys for the MCP server in wp-admin.
 5. Create the namespace and the three Secrets with production values (a new
-   `AUTH_TOKEN_PEPPER` from `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`
-   and production database URLs).
+   `AUTH_TOKEN_PEPPER` from `python3 -c "import secrets; print(secrets.token_urlsafe(48))"`,
+   a new `UPSTREAM_CREDENTIAL_KEYS` from `docker run --rm <gateway image> gateway-admin
+   generate-credential-key`, and production database URLs). Review `HOSTED_ALLOWED_IMAGES` and
+   pin hosted images by digest (`image@sha256:…`).
 6. Copy `deploy/helm/urumi/values-production.yaml`, set the hosts, `WC_BASE_URL` (the store's
    HTTPS home URL) and registry, then:
 
@@ -327,5 +343,6 @@ gateway.
 | Tool calls return `upstream_unavailable` | The connector URL still points at `127.0.0.1`; see "Point the gateway at the in-cluster MCP server". |
 | MCP tool calls fail to reach the store | `kubectl -n urumi get pod -l app.kubernetes.io/name=woocommerce-mcp -o jsonpath='{.items[0].spec.hostAliases}'` should map `wordpress.local` to the `store-wordpress` ClusterIP; redeploy if the store Service was recreated. |
 | `421 Misdirected Request` from the MCP server | The `Host` the client sends is not in `MCP_ALLOWED_HOSTS`. |
+| Hosted server not ready, or `upstream_unauthorized` | See the troubleshooting table in [hosted-mcp.md](hosted-mcp.md). |
 | Dashboard shows "service unreachable" | `curl http://urumi.local/api/gateway/health/live`; check `GATEWAY_UPSTREAM`/`AGENT_UPSTREAM` and the NetworkPolicies. |
 | Images not found (`ErrImageNeverPull`/`ImagePullBackOff`) | Re-run `deploy-local.sh` (it imports the images into k3d). |
