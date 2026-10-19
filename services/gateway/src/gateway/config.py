@@ -219,6 +219,17 @@ class UpstreamSettings(BaseSettings):
     def _split_keys(cls, value: object) -> object:
         return _split_csv(value)
 
+    def is_exactly_allowed(self, host: str, port: int) -> bool:
+        """The host is named without wildcards by some pattern (the port part may be '*')."""
+        target = f"[{host}]:{port}" if ":" in host else f"{host}:{port}"
+        for pattern in self.allowed_hosts:
+            pattern_host = pattern.lower().rsplit(":", 1)[0]
+            if not any(ch in pattern_host for ch in "*?[") and fnmatch.fnmatchcase(
+                target, pattern.lower()
+            ):
+                return True
+        return False
+
     def is_allowed_url(self, url: str) -> bool:
         parts = urlsplit(url)
         if parts.scheme not in {"http", "https"} or not parts.hostname:

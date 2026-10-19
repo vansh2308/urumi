@@ -74,7 +74,12 @@ Clients name a connector by **slug**; the gateway looks up its URL in the regist
 only by platform admins and must match `UPSTREAM_ALLOWED_HOSTS` (`host:port` patterns), and
 redirects are never followed, so the gateway cannot be pointed at arbitrary hosts. Hosted servers
 (deployed from an allow-listed image with `POST /v1/hosted-servers`) get a URL the gateway builds
-from their in-cluster Service, which cannot be edited.
+from their in-cluster Service, which cannot be edited. On top of the host allow-list, the host is resolved at
+registration and before every call: link-local and cloud metadata addresses are always refused,
+and private or loopback addresses only when the host is named exactly (no wildcard) in the
+allow-list, so a broad pattern or a later DNS change cannot reach internal services
+(`upstream_blocked`). Tool titles and descriptions from upstreams are stripped of control and
+invisible characters and capped in length before anyone sees them.
 
 Calls go through the official MCP SDK client over Streamable HTTP on a shared connection pool,
 with per-connector deadlines (`timeout_seconds`), a per-connector concurrency limit per replica

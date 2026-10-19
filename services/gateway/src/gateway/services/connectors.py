@@ -54,6 +54,7 @@ from gateway.upstream.credentials import (
     CredentialUnavailableError,
     UpstreamCredential,
 )
+from gateway.upstream.ssrf import DestinationBlockedError, check_destination
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,128}$")
@@ -196,6 +197,7 @@ class ConnectorService:
             timeout_seconds=connector.timeout_seconds,
             max_concurrency=connector.max_concurrency,
             headers=headers,
+            verify_destination=connector.kind != ConnectorKind.HOSTED.value,
         )
 
     def _apply_credential(self, connector: Connector, credential: UpstreamCredential) -> None:
@@ -210,13 +212,17 @@ class ConnectorService:
                 "Managing the connector registry requires a platform admin."
             )
 
-    def _check_url(self, url: str) -> str:
+    async def _check_url(self, url: str) -> str:
         url = url.strip()
         if not self._settings.is_allowed_url(url):
             raise InvalidInputError(
                 "The connector URL is not on the gateway's upstream allow-list "
                 "(UPSTREAM_ALLOWED_HOSTS) or uses a disallowed scheme."
             )
+        try:
+            await check_destination(url, self._settings)
+        except DestinationBlockedError as exc:
+            raise InvalidInputError(f"The connector URL is not allowed: {exc.reason}.") from exc
         return url
 
     def _check_timeout(self, value: float | None) -> float:
@@ -237,7 +243,7 @@ class ConnectorService:
             slug=spec.slug,
             display_name=spec.display_name.strip(),
             description=spec.description.strip(),
-            url=self._check_url(spec.url),
+            url=await self._check_url(spec.url),
             enabled=True,
             timeout_seconds=self._check_timeout(spec.timeout_seconds),
             max_concurrency=spec.max_concurrency or self._settings.default_max_concurrency,
@@ -304,7 +310,7 @@ class ConnectorService:
             if "url" in values:
                 if hosted is not None:
                     raise InvalidInputError("A hosted server's URL is managed by the platform.")
-                values["url"] = self._check_url(values["url"])
+                values["url"] = await self._check_url(values["url"])
             if (
                 hosted is not None
                 and "enabled" in values
