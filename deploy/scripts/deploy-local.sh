@@ -4,7 +4,8 @@
 #   deploy/scripts/deploy-local.sh            # all services, tag = current commit
 #   SKIP_BUILD=1 deploy/scripts/deploy-local.sh
 #
-# Requires the Secrets from create-local-secrets.sh. Touches only the `urumi` release: the
+# Requires the Secrets from create-local-secrets.sh. `--atomic` rolls the release back to the
+# previous revision automatically if the upgrade (or a migration) fails. Touches only the `urumi` release: the
 # `store` release (WordPress, MariaDB and their volumes) is never modified.
 set -euo pipefail
 
@@ -43,5 +44,5 @@ helm upgrade --install urumi "${ROOT}/deploy/helm/urumi" -n "${NAMESPACE}" \
   -f "${ROOT}/deploy/helm/urumi/values.yaml" \
   -f "${ROOT}/deploy/helm/urumi/values-local.yaml" \
   --set global.imageTag="${TAG}" \
-  --wait --timeout 10m
+  --atomic --wait --timeout 10m
 kubectl -n "${NAMESPACE}" get pods -l app.kubernetes.io/instance=urumi
