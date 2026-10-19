@@ -11,7 +11,7 @@
 # Secrets are never stored here. Each service reads its credentials from a Secret created out of
 # band (deploy/scripts/create-local-secrets.sh locally, your secret manager in production):
 #   woocommerce-mcp-secrets: WC_CONSUMER_KEY, WC_CONSUMER_SECRET, DB_URL
-#   gateway-secrets:         DB_URL, AUTH_TOKEN_PEPPER
+#   gateway-secrets:         DB_URL, AUTH_TOKEN_PEPPER, UPSTREAM_CREDENTIAL_KEYS
 #   agent-secrets:           DB_URL, GEMINI_API_KEY
 
 global:
@@ -83,9 +83,23 @@ gateway:
     UPSTREAM_ALLOWED_HOSTS: woocommerce-mcp.urumi.svc.cluster.local:8000
     UPSTREAM_ALLOW_INSECURE_HTTP: "true"
     UPSTREAM_IP_FAMILY: auto
+    # Hosted MCP servers (see hostedMcp below; the namespace must match hostedMcp.namespace).
+    HOSTED_ENABLED: "true"
+    HOSTED_NAMESPACE: urumi-mcp
+    HOSTED_GATEWAY_NAMESPACE: urumi
+    HOSTED_GATEWAY_POD_LABEL: app.kubernetes.io/name=gateway
+    # Only these images can be deployed by an admin (fnmatch patterns). Pin digests in production.
+    HOSTED_ALLOWED_IMAGES: >-
+      ghcr.io/github/github-mcp-server:*,mcp/duckduckgo:*
+    HOSTED_MAX_SERVERS: "10"
   secretEnv:
     - { name: DB_URL, secretName: gateway-secrets }
     - { name: AUTH_TOKEN_PEPPER, secretName: gateway-secrets }
+    # Encrypts connector credentials at rest. Optional: without it credentials are refused.
+    - { name: UPSTREAM_CREDENTIAL_KEYS, secretName: gateway-secrets, optional: true }
+  # The gateway's token is used only for its Role in the hosted namespace (templates/hosted-mcp).
+  serviceAccount:
+    automountToken: true
   migration:
     enabled: true
   networkPolicy:
@@ -104,6 +118,27 @@ gateway:
           - podSelector:
               matchLabels:
                 app.kubernetes.io/name: agent
+
+# --- Hosted MCP servers ----------------------------------------------------------------------------
+# Namespace, quota, default-deny NetworkPolicy and the gateway's Role for MCP servers that admins
+# deploy from container images through the gateway (templates/hosted-mcp.yaml).
+hostedMcp:
+  enabled: true
+  namespace: urumi-mcp
+  # Ceiling for every hosted server together.
+  quota:
+    pods: "10"
+    requests.cpu: "2"
+    requests.memory: 2Gi
+    limits.cpu: "4"
+    limits.memory: 4Gi
+    services: "10"
+    secrets: "20"
+  # Defaults for containers that do not set their own (the gateway always does).
+  limitRange:
+    default: { cpu: 250m, memory: 256Mi }
+    defaultRequest: { cpu: 50m, memory: 64Mi }
+    max: { cpu: "1", memory: 1Gi }
 
 # --- Agent ----------------------------------------------------------------------------------------
 agent:

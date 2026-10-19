@@ -1,0 +1,100 @@
+{{- /*
+Hosted MCP servers: the namespace the gateway deploys admin-chosen MCP server images into, the
+guardrails around it, and the gateway's (only) Kubernetes permissions.
+
+* Namespace: kept on `helm uninstall` (resource-policy keep) so running hosted servers are not
+  deleted behind the gateway's back; remove them through the gateway first.
+* ResourceQuota + LimitRange: a ceiling on what all hosted servers together can consume.
+* NetworkPolicy default-deny: anything not explicitly allowed by a server's own policy (which
+  the gateway creates with it) is blocked in both directions.
+* Role + RoleBinding: the gateway's ServiceAccount may manage Deployments, Services, Secrets and
+  NetworkPolicies, and read Pods, in this namespace only. No cluster-wide rights, no access to
+  the namespace it runs in.
+*/ -}}
+{{- with .Values.hostedMcp }}
+{{- if .enabled }}
+{{- $ns := .namespace }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $ns }}
+  labels:
+    app.kubernetes.io/part-of: urumi
+    app.kubernetes.io/component: hosted-mcp
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+  annotations:
+    helm.sh/resource-policy: keep
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: hosted-mcp
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  hard:
+    {{- toYaml .quota | nindent 4 }}
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: hosted-mcp
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  limits:
+    - type: Container
+      {{- toYaml .limitRange | nindent 6 }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/part-of: urumi
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: urumi-gateway-hosted-mcp
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/part-of: urumi
+rules:
+  - apiGroups: [""]
+    resources: [secrets, services]
+    verbs: [get, list, create, update, patch, delete]
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, create, update, patch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [networkpolicies]
+    verbs: [get, list, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: urumi-gateway-hosted-mcp
+  namespace: {{ $ns }}
+  labels:
+    app.kubernetes.io/part-of: urumi
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: urumi-gateway-hosted-mcp
+subjects:
+  - kind: ServiceAccount
+    name: {{ $.Values.gateway.fullnameOverride | default "gateway" }}
+    namespace: {{ $.Release.Namespace }}
+{{- end }}
+{{- end }}
