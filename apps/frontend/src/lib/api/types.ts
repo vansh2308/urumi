@@ -105,6 +105,8 @@ export interface ApiKey {
   last_used_at: string | null
   revoked_at: string | null
   rotated_from_id: string | null
+  /** A dashboard key that ends with the login session. */
+  session_bound?: boolean
 }
 
 export interface IssuedApiKey extends ApiKey {

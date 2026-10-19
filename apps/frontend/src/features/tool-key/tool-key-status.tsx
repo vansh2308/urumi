@@ -1,4 +1,5 @@
-import { KeyRoundIcon, UnplugIcon } from "lucide-react"
+import { KeyRoundIcon, RefreshCwIcon } from "lucide-react"
+import { toast } from "sonner"
 import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
@@ -17,7 +18,7 @@ import { useToolKey } from "./use-tool-key"
 
 /** Shows which API key this tab uses for tool calls, with connect/disconnect. */
 export function ToolKeyStatus({ teamId }: { teamId: string }) {
-  const { toolKey, clear } = useToolKey(teamId)
+  const { toolKey, connecting, renew } = useToolKey(teamId)
   const [open, setOpen] = useState(false)
   return (
     <>
@@ -33,21 +34,32 @@ export function ToolKeyStatus({ teamId }: { teamId: string }) {
             <DropdownMenuLabel className="font-normal">
               <div className="text-sm">{toolKey.name}</div>
               <div className="text-xs text-muted-foreground">
-                {toolKey.expiresAt ? `Expires ${formatRelative(toolKey.expiresAt)}` : "Pasted key"}
+                {toolKey.sessionBound
+                  ? `Ends with this login · ${formatRelative(toolKey.expiresAt)}`
+                  : toolKey.expiresAt
+                    ? `Expires ${formatRelative(toolKey.expiresAt)}`
+                    : "Pasted key (this tab only)"}
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => setOpen(true)}>
               <KeyRoundIcon /> Use a different key
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={clear}>
-              <UnplugIcon /> Disconnect
+            <DropdownMenuItem
+              onClick={() =>
+                void renew().then(
+                  () => toast.success("Issued a new session key."),
+                  () => toast.error("Could not issue a session key.")
+                )
+              }
+            >
+              <RefreshCwIcon /> Issue a new session key
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       ) : (
-        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-          <KeyRoundIcon /> Connect API key
+        <Button variant="outline" size="sm" onClick={() => setOpen(true)} disabled={connecting}>
+          <KeyRoundIcon /> {connecting ? "Connecting…" : "Connect API key"}
         </Button>
       )}
       <ToolKeyDialog open={open} onOpenChange={setOpen} teamId={teamId} />

@@ -16,17 +16,15 @@ import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { useCreateApiKey } from "@/hooks/queries/use-api-keys"
-import { useTeam } from "@/hooks/queries/use-team"
-import { useWorkspace } from "@/hooks/queries/use-session"
 import { gateway } from "@/lib/api/gateway"
 import { errorMessage } from "@/lib/api/http"
 
-import { useToolKey } from "./use-tool-key"
+import { issueSessionKey, useToolKey } from "./use-tool-key"
 
 /**
  * The gateway only lets platform API keys (urk_) call tools, and the agent authenticates with
- * the caller's key, so chat and tool runs need one. It is kept in this tab's sessionStorage.
+ * the caller's key, so chat and tool runs need one. Normally it is the login session's key,
+ * issued automatically; this dialog renews it or connects a pasted key for this tab only.
  */
 export function ToolKeyDialog({
   open,
@@ -37,12 +35,9 @@ export function ToolKeyDialog({
   onOpenChange: (open: boolean) => void
   teamId: string
 }) {
-  const { isTeamAdmin } = useWorkspace()
-  const team = useTeam(teamId)
   const { setToolKey } = useToolKey(teamId)
-  const create = useCreateApiKey(teamId)
   const [pasted, setPasted] = useState("")
-  const canCreate = isTeamAdmin || team.data?.members_can_create_keys
+  const renew = useMutation({ mutationFn: () => issueSessionKey(teamId) })
 
   const verify = useMutation({
     mutationFn: async (raw: string) => {
@@ -55,27 +50,13 @@ export function ToolKeyDialog({
   })
 
   const createKey = () =>
-    create.mutate(
-      {
-        name: `Dashboard ${new Date().toLocaleString()}`,
-        scopes: ["tools:read", "tools:call", "usage:read"],
-        expires_in_days: 1,
+    renew.mutate(undefined, {
+      onSuccess: () => {
+        toast.success("Connected this login's session key.")
+        onOpenChange(false)
       },
-      {
-        onSuccess: (issued) => {
-          setToolKey({
-            key: issued.key,
-            keyId: issued.id,
-            prefix: issued.prefix,
-            name: issued.name,
-            expiresAt: issued.expires_at,
-          })
-          toast.success("Created a 1-day API key for this tab.")
-          onOpenChange(false)
-        },
-        onError: (e) => toast.error(errorMessage(e)),
-      }
-    )
+      onError: (e) => toast.error(errorMessage(e)),
+    })
 
   const usePasted = () =>
     verify.mutate(pasted.trim(), {
@@ -100,24 +81,24 @@ export function ToolKeyDialog({
           <DialogTitle>Connect an API key</DialogTitle>
           <DialogDescription>
             Tool calls and the agent act with a platform API key, so they get exactly your
-            permissions. The key stays in this browser tab only and is never shown again.
+            permissions. Your conversations belong to you, not to a key, so switching keys keeps
+            your chat history.
           </DialogDescription>
         </DialogHeader>
-        <Tabs defaultValue={canCreate ? "create" : "paste"}>
+        <Tabs defaultValue="create">
           <TabsList className="w-full">
-            <TabsTrigger value="create" disabled={!canCreate}>
-              Create one
-            </TabsTrigger>
+            <TabsTrigger value="create">Session key</TabsTrigger>
             <TabsTrigger value="paste">Paste existing</TabsTrigger>
           </TabsList>
           <TabsContent value="create" className="space-y-3 pt-2">
             <p className="text-sm text-muted-foreground">
-              Issues a key owned by you in this team with the tools:read, tools:call and
-              usage:read scopes, expiring in 1 day. You can revoke it on the API keys page.
+              A key with the tools:read, tools:call and usage:read scopes that lives as long as
+              this login and is revoked when you sign out. Issuing it again replaces the previous
+              one.
             </p>
-            <Button className="w-full" onClick={createKey} disabled={create.isPending}>
-              {create.isPending && <Spinner />}
-              Create and connect
+            <Button className="w-full" onClick={createKey} disabled={renew.isPending}>
+              {renew.isPending && <Spinner />}
+              Issue session key
             </Button>
           </TabsContent>
           <TabsContent value="paste" className="space-y-3 pt-2">

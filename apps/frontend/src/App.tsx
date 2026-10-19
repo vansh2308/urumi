@@ -10,9 +10,13 @@ import { queryClient } from "@/lib/query"
 import { router } from "@/routes/router"
 
 // A 401 on the session token means it expired or was revoked: drop it and go to sign-in.
-// 401s on tool keys (urk_) are handled where they are used.
+// A 401 on a tool key (urk_) means it was revoked or expired: drop it, and the login's session
+// key is issued again where it is needed.
 setUnauthorizedHandler((token) => {
   const state = useAuthStore.getState()
+  for (const [teamId, key] of Object.entries(state.toolKeys)) {
+    if (key.key === token) state.setToolKey(teamId, null)
+  }
   if (state.token === token) {
     state.signOut()
     queryClient.clear()

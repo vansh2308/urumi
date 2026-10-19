@@ -32,7 +32,7 @@ export default function ChatPage() {
   const { conversationId } = useParams()
   const navigate = useNavigate()
   const teamId = useTeamId()
-  const { toolKey, clear } = useToolKey(teamId)
+  const { toolKey, clear, connecting } = useToolKey(teamId)
   const [keyDialog, setKeyDialog] = useState(false)
   const [listOpen, setListOpen] = useState(false)
   const conversation = useConversation(toolKey, conversationId)
@@ -139,11 +139,17 @@ export default function ChatPage() {
           }}
         >
           <div className="mx-auto w-full max-w-3xl space-y-6 px-4 py-6">
-            {!toolKey ? (
+            {!toolKey && connecting ? (
+              <EmptyState
+                icon={<KeyRoundIcon />}
+                title="Connecting…"
+                description="Issuing this login's API key for the agent. Your conversations are kept."
+              />
+            ) : !toolKey ? (
               <EmptyState
                 icon={<KeyRoundIcon />}
                 title="Connect an API key to chat"
-                description="The agent acts with a platform API key, so it can only use the tools you are allowed to use. Create a short-lived key for this tab or paste one."
+                description="The agent acts with a platform API key, so it can only use the tools you are allowed to use. The dashboard could not issue this login's key; try again or paste one."
                 action={<Button onClick={() => setKeyDialog(true)}>Connect API key</Button>}
               />
             ) : notFound ? (

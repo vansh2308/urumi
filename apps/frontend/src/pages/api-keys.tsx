@@ -60,7 +60,14 @@ export default function ApiKeysPage() {
       header: "Name",
       cell: ({ row }) => (
         <div>
-          <div className="font-medium">{row.original.name}</div>
+          <div className="flex items-center gap-2 font-medium">
+            {row.original.name}
+            {row.original.session_bound && (
+              <Badge variant="outline" className="font-normal">
+                Ends with login
+              </Badge>
+            )}
+          </div>
           <div className="font-mono text-xs text-muted-foreground">{row.original.prefix}…</div>
         </div>
       ),

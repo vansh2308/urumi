@@ -128,6 +128,9 @@ export const gateway = {
       get<ApiKey>(token, `${team(teamId)}/api-keys/${keyId}`),
     create: (token: string, teamId: string, body: CreateApiKeyRequest) =>
       post<IssuedApiKey>(token, `${team(teamId)}/api-keys`, body),
+    /** The dashboard's key for this login session; replaces the session's previous one. */
+    session: (token: string, teamId: string) =>
+      post<IssuedApiKey>(token, `${team(teamId)}/api-keys/session`),
     revoke: (token: string, teamId: string, keyId: string) =>
       post<ApiKey>(token, `${team(teamId)}/api-keys/${keyId}/revoke`),
     rotate: (token: string, teamId: string, keyId: string, graceHours: number) =>
