@@ -251,7 +251,7 @@ def _classify(exc: BaseException) -> UpstreamError:  # noqa: PLR0911 - flat disp
         status = exc.response.status_code
         if status in {401, 403}:
             return UpstreamAuthError(
-                f"The MCP server rejected the gateway's credential (HTTP {status}). "
+                f"The MCP server refused the request as unauthorized (HTTP {status}). "
                 "Check the connector's credential."
             )
         if status >= 500 or status == 429:
