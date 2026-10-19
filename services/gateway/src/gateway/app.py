@@ -4,7 +4,8 @@ Routes
 ------
 * ``/health/live``, ``/health/ready``, ``/metrics``: probes and Prometheus metrics.
 * ``/v1/...``: versioned REST API (OpenAPI at ``/docs`` when enabled).
-* ``/v1/mcp/{connector}``: MCP Streamable HTTP endpoint for MCP clients (API key auth).
+* ``/v1/mcp`` (every enabled server) and ``/v1/mcp/{connector}`` (one server): MCP
+  Streamable HTTP endpoints for MCP clients (API key auth).
 """
 
 from __future__ import annotations
@@ -80,6 +81,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(connectors.team)
     app.include_router(hosted.router)
     app.include_router(activity.router)
+    app.router.routes.append(
+        Route(f"{API_PREFIX}/mcp", mcp_proxy, methods=["GET", "POST", "DELETE"])
+    )
     app.router.routes.append(
         Route(f"{API_PREFIX}/mcp/{{connector}}", mcp_proxy, methods=["GET", "POST", "DELETE"])
     )

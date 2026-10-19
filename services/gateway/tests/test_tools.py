@@ -19,12 +19,14 @@ def _call_path(team_id: str, slug: str, tool: str) -> str:
 
 @asynccontextmanager
 async def mcp_session(
-    client: httpx.AsyncClient, slug: str, token: str
+    client: httpx.AsyncClient, slug: str | None, token: str
 ) -> AsyncIterator[ClientSession]:
+    """An MCP client session on one server's endpoint, or on ``/v1/mcp`` when slug is None."""
     client.headers.update(bearer(token))
+    url = f"{BASE_URL}/v1/mcp" + (f"/{slug}" if slug else "")
     try:
         async with (
-            streamable_http_client(f"{BASE_URL}/v1/mcp/{slug}", http_client=client) as (r, w, _),
+            streamable_http_client(url, http_client=client) as (r, w, _),
             ClientSession(r, w) as session,
         ):
             await session.initialize()
@@ -366,3 +368,61 @@ async def test_removing_a_connector_hides_its_tools(
     assert by_member.status_code == 403
     assert removed.status_code == 204
     assert call.status_code == 404
+
+
+async def _add_connector(
+    client: httpx.AsyncClient, world: Any, slug: str, url: str, *, tools: list[str]
+) -> None:
+    registered = await client.post(
+        "/v1/connectors",
+        headers=world.admin.auth,
+        json={"slug": slug, "display_name": slug.title(), "url": url},
+    )
+    assert registered.status_code == 201, registered.text
+    policy = await client.put(
+        f"/v1/teams/{world.team_id}/connectors/{slug}",
+        headers=world.admin.auth,
+        json={"tools": tools},
+    )
+    assert policy.status_code == 200, policy.text
+
+
+async def test_single_endpoint_lists_every_server_and_routes_calls(
+    app_client: AppClient, database_dsn: str, upstream_url: str, closed_port_url: str
+) -> None:
+    async with app_client() as client:
+        world = await build_world(client, database_dsn, upstream_url, member_tools=["echo"])
+        twin, dead = f"twin-{world.slug}", f"dead-{world.slug}"
+        await _add_connector(client, world, twin, upstream_url, tools=["echo", "add"])
+        await _add_connector(client, world, dead, closed_port_url, tools=["echo"])
+        admin_key = await create_key(client, world.admin, world.team_id)
+        member_key = await create_key(client, world.member, world.team_id)
+
+        async with mcp_session(client, None, admin_key["key"]) as session:
+            admin_tools = await session.list_tools()
+            added = await session.call_tool(f"{twin}__add", {"a": 2, "b": 3})
+            unqualified = await session.call_tool("add", {"a": 2, "b": 3})
+        async with mcp_session(client, None, member_key["key"]) as session:
+            member_tools = await session.list_tools()
+            denied = await session.call_tool(f"{twin}__echo", {"text": "x"})
+        rest = await client.get(
+            f"/v1/teams/{world.team_id}/tools", headers=bearer(admin_key["key"])
+        )
+
+    names = {t.name for t in admin_tools.tools}
+    # Same tool name on two servers stays distinct; the dead server is left out, not fatal.
+    assert names == {
+        f"{world.slug}__echo",
+        f"{world.slug}__add",
+        f"{world.slug}__fail",
+        f"{twin}__echo",
+        f"{twin}__add",
+    }
+    assert all(t.description and t.description.startswith("[") for t in admin_tools.tools)
+    assert added.isError is False and added.content[0].text == "5"  # type: ignore[union-attr]
+    assert unqualified.isError is True
+    # A member sees only what they were granted (echo on the first server, nothing on twin).
+    assert {t.name for t in member_tools.tools} == {f"{world.slug}__echo"}
+    assert denied.isError is True
+    assert rest.status_code == 200
+    assert {"connector": dead, "code": "upstream_unavailable"} in rest.json()["unavailable"]

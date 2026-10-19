@@ -8,6 +8,7 @@ the upstream call so no database connection is held while waiting on it.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -25,7 +26,7 @@ from gateway.db.models import ApiKeyScope, AuditOutcome, ToolInvocation
 from gateway.errors import AppError, PermissionDeniedError, PersistenceUnavailableError
 from gateway.metrics import Metrics
 from gateway.services.audit import AuditLog
-from gateway.services.connectors import ConnectorService
+from gateway.services.connectors import ConnectorService, TeamConnectorView
 from gateway.services.principal import CredentialKind, Principal
 from gateway.services.teams import TeamContext, TeamService
 from gateway.upstream.client import McpUpstreamClient
@@ -35,6 +36,34 @@ logger = logging.getLogger(__name__)
 # Upstream tool errors follow "<code>: <message>" (FastMCP prefixes "Error executing tool X: ");
 # keep only a well-formed code.
 _ERROR_CODE_RE = re.compile(r"^(?:Error executing tool [^:]{1,128}: )?([a-z][a-z0-9_]{1,63}):")
+
+
+# Aggregated tool names are "<connector slug>__<tool>". Slugs cannot contain "_", so the first
+# "__" always separates them, whatever the upstream tool is called.
+NAME_SEPARATOR = "__"
+
+
+def qualified_name(slug: str, tool: str) -> str:
+    return f"{slug}{NAME_SEPARATOR}{tool}"
+
+
+def split_qualified_name(name: str) -> tuple[str, str] | None:
+    slug, sep, tool = name.partition(NAME_SEPARATOR)
+    return (slug, tool) if sep and slug and tool else None
+
+
+@dataclass(frozen=True, slots=True)
+class ServerTools:
+    slug: str
+    display_name: str
+    tools: list[mcp_types.Tool]
+
+
+@dataclass(frozen=True, slots=True)
+class AggregatedTools:
+    servers: list[ServerTools]
+    # Servers the caller may use that did not answer in time; they are left out, not fatal.
+    unavailable: list[tuple[str, str]]  # (slug, error code)
 
 
 class Transport(StrEnum):
@@ -61,6 +90,7 @@ class ToolService:
         upstream: McpUpstreamClient,
         audit: AuditLog,
         metrics: Metrics,
+        aggregate_list_timeout_seconds: float = 10.0,
     ) -> None:
         self._db = db
         self._teams = teams
@@ -68,6 +98,7 @@ class ToolService:
         self._upstream = upstream
         self._audit = audit
         self._metrics = metrics
+        self._aggregate_timeout = aggregate_list_timeout_seconds
 
     async def list_tools(self, ctx: TeamContext, slug: str) -> list[mcp_types.Tool]:
         """Tools on ``slug`` the caller may invoke (needs ``tools:read`` for API keys)."""
@@ -75,6 +106,44 @@ class ToolService:
         access = await self._connectors.resolve(ctx, slug)
         tools = await self._upstream.list_tools(access.target)
         return [t for t in tools if access.tools.allows(t.name)]
+
+    async def list_all_tools(self, ctx: TeamContext) -> AggregatedTools:
+        """Every tool the caller may use, across all enabled connectors, fetched in parallel.
+
+        A slow or failing upstream is reported in ``unavailable`` and never fails the list.
+        """
+        ctx.principal.require_scope(ApiKeyScope.TOOLS_READ)
+        views = [
+            v for v in await self._connectors.list_team_connectors(ctx) if not v.effective.is_empty
+        ]
+        results = await asyncio.gather(
+            *(self._server_tools(v) for v in views), return_exceptions=True
+        )
+        servers: list[ServerTools] = []
+        unavailable: list[tuple[str, str]] = []
+        for view, result in zip(views, results, strict=True):
+            if isinstance(result, AppError):
+                unavailable.append((view.connector.slug, result.code))
+            elif isinstance(result, TimeoutError):
+                unavailable.append((view.connector.slug, "upstream_timeout"))
+            elif isinstance(result, BaseException):
+                logger.error(
+                    "listing tools failed",
+                    extra={"connector": view.connector.slug, "error": type(result).__name__},
+                )
+                unavailable.append((view.connector.slug, "internal_error"))
+            else:
+                servers.append(result)
+        return AggregatedTools(servers=servers, unavailable=unavailable)
+
+    async def _server_tools(self, view: TeamConnectorView) -> ServerTools:
+        async with asyncio.timeout(self._aggregate_timeout):
+            tools = await self._upstream.list_tools(self._connectors.target_of(view.connector))
+        return ServerTools(
+            slug=view.connector.slug,
+            display_name=view.connector.display_name,
+            tools=[t for t in tools if view.effective.allows(t.name)],
+        )
 
     async def call_tool(
         self, call: CallContext, arguments: dict[str, Any]
