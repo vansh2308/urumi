@@ -15,6 +15,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Skeleton } from "@/components/ui/skeleton"
 import { describeAccess } from "@/features/connectors/access"
 import { ConnectorFormDialog } from "@/features/connectors/connector-form-dialog"
+import { HealthBadge } from "@/features/connectors/health-badge"
 import { HostedDeploymentCard } from "@/features/connectors/hosted-deployment-card"
 import { TeamPolicyDialog } from "@/features/connectors/team-policy-dialog"
 import { useConnectorActions } from "@/features/connectors/use-connector-actions"
@@ -24,6 +25,7 @@ import { ToolRiskBadge } from "@/features/tools/tool-risk-badge"
 import { useUsageSummary } from "@/hooks/queries/use-activity"
 import {
   useCatalog,
+  useConnectorStatus,
   useConnectorTools,
   useHostedServers,
   useProbeConnector,
@@ -62,6 +64,8 @@ export default function McpServerDetailPage() {
   const catalog = useCatalog(teamId, serverId, isTeamAdmin && team !== null)
   const usage = useUsageSummary(teamId, { group_by: "connector", connector: serverId, since: SINCE })
   const probe = useProbeConnector()
+  const statusMap = useConnectorStatus(teamId, isPlatformAdmin)
+  const status = statusMap.data?.get(serverId)
   const actions = useConnectorActions(teamId, () => navigate("/mcp-servers"))
   const [editing, setEditing] = useState(false)
   const [policyOpen, setPolicyOpen] = useState(false)
@@ -151,7 +155,14 @@ export default function McpServerDetailPage() {
         description={description || undefined}
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => void tools.refetch()} disabled={!hasAccess}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void statusMap.refetch()
+                if (hasAccess) void tools.refetch()
+              }}
+            >
               <RefreshCwIcon /> Check health
             </Button>
             {isTeamAdmin && (!connector || connector.enabled) && (
@@ -210,7 +221,16 @@ export default function McpServerDetailPage() {
                 {team ? <StatusBadge status="enabled" label="Enabled" /> : <StatusBadge status="disabled" label="Not enabled" />}
               </Meta>
               <Meta label="Health">
-                {health === null ? (
+                {status ? (
+                  <div className="space-y-1">
+                    <HealthBadge status={status} />
+                    {status.state === "unreachable" && (
+                      <p className="text-xs text-muted-foreground">
+                        <span className="font-mono">{status.error_code}</span>: {status.error_message}
+                      </p>
+                    )}
+                  </div>
+                ) : health === null ? (
                   <span className="text-muted-foreground">Needs tool access to check</span>
                 ) : health === "checking" ? (
                   <StatusBadge status="pending" label="Checking" />
@@ -221,6 +241,20 @@ export default function McpServerDetailPage() {
                   />
                 )}
               </Meta>
+              {status?.last_failure && (
+                <Meta label="Last failure">
+                  <span className="text-xs">
+                    <span className="font-mono">{status.last_failure.error_code}</span>{" "}
+                    {formatDateTime(status.last_failure.at)}
+                    {status.last_success_at && (
+                      <span className="text-muted-foreground">
+                        {" "}
+                        · last success {formatDateTime(status.last_success_at)}
+                      </span>
+                    )}
+                  </span>
+                </Meta>
+              )}
               <Meta label="Gateway route">
                 <span className="inline-flex items-center gap-1 font-mono text-xs">
                   /v1/mcp/{serverId}

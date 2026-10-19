@@ -223,6 +223,18 @@ export interface UpdateHostedServerRequest {
   egress?: HostedEgress
 }
 
+export interface ConnectorStatus {
+  slug: string
+  display_name: string
+  state: "connected" | "unreachable" | "disabled"
+  error_code: string | null
+  error_message: string | null
+  latency_ms: number | null
+  checked_at: string
+  last_success_at: string | null
+  last_failure: { at: string; error_code: string | null; error_message: string | null; duration_ms: number } | null
+}
+
 export interface ToolSummary {
   name: string
   title?: string | null
