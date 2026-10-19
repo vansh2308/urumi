@@ -21,6 +21,7 @@ from gateway.api.schemas import (
     CallToolRequest,
     CatalogEntryOut,
     ConnectorOut,
+    CredentialOut,
     GrantOut,
     ProbeOut,
     RegisterConnectorRequest,
@@ -49,6 +50,8 @@ def _connector_out(connector: Connector, principal: Principal) -> ConnectorOut:
     )
     if principal.is_platform_admin:
         out.url = connector.url
+        if connector.credential_header:
+            out.credential = CredentialOut(header_name=connector.credential_header)
         out.timeout_seconds = connector.timeout_seconds
         out.max_concurrency = connector.max_concurrency
         out.created_at = connector.created_at
@@ -80,7 +83,8 @@ def _grant_out(grant: GrantView) -> GrantOut:
 async def register_connector(
     body: RegisterConnectorRequest, principal: SessionPrincipalDep, container: ContainerDep
 ) -> ConnectorOut:
-    """Register an upstream MCP server (platform admin). The URL must be allow-listed."""
+    """Register an upstream MCP server (platform admin). The URL must be allow-listed; the
+    optional credential is stored encrypted and sent only to that URL."""
     connector = await container.connectors.register(
         principal,
         NewConnector(
@@ -90,6 +94,7 @@ async def register_connector(
             url=body.url,
             timeout_seconds=body.timeout_seconds,
             max_concurrency=body.max_concurrency,
+            credential=body.credential.to_domain() if body.credential else None,
         ),
     )
     return _connector_out(connector, principal)
@@ -131,9 +136,19 @@ async def update_connector(
             enabled=body.enabled,
             timeout_seconds=body.timeout_seconds,
             max_concurrency=body.max_concurrency,
+            credential=body.credential.to_domain() if body.credential else None,
+            clear_credential=body.clear_credential,
         ),
     )
     return _connector_out(connector, principal)
+
+
+@registry.delete("/{connector_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_connector(
+    connector_id: uuid.UUID, principal: SessionPrincipalDep, container: ContainerDep
+) -> None:
+    """Remove a connector with every team's policy and grants for it (platform admin)."""
+    await container.connectors.remove(principal, connector_id)
 
 
 @registry.post("/{connector_id}/probe", response_model=ProbeOut)

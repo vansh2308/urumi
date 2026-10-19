@@ -196,10 +196,21 @@ class UpstreamSettings(BaseSettings):
         default="auto",
         description="'ipv4' avoids the macOS IPv6 mDNS stall for *.local upstream names.",
     )
+    credential_keys: Annotated[list[SecretStr], NoDecode] = Field(
+        default_factory=list,
+        description="Fernet keys (comma separated) that encrypt connector credentials at rest. "
+        "The first encrypts, all decrypt. Generate one with `poetry run gateway-admin "
+        "generate-credential-key`. Empty disables connector credentials.",
+    )
 
     @field_validator("allowed_hosts", mode="before")
     @classmethod
     def _split_hosts(cls, value: object) -> object:
+        return _split_csv(value)
+
+    @field_validator("credential_keys", mode="before")
+    @classmethod
+    def _split_keys(cls, value: object) -> object:
         return _split_csv(value)
 
     def is_allowed_url(self, url: str) -> bool:

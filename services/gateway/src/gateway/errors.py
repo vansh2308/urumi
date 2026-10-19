@@ -116,3 +116,10 @@ class UpstreamRejectedError(UpstreamError):
 
     code = "upstream_rejected"
     status_code = 502
+
+
+class UpstreamAuthError(UpstreamError):
+    """The upstream refused the gateway's credential (HTTP 401/403), or it cannot be used."""
+
+    code = "upstream_unauthorized"
+    status_code = 502

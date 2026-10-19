@@ -27,6 +27,7 @@ from gateway.services.rate_limit import RateLimiter
 from gateway.services.teams import TeamService
 from gateway.services.tools import ToolService
 from gateway.upstream.client import McpUpstreamClient, build_upstream_http_client
+from gateway.upstream.credentials import CredentialCipher
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,12 @@ def build_container(settings: Settings) -> Container:
     http_client = build_upstream_http_client(settings.upstream)
     upstream = McpUpstreamClient(http_client, settings=settings.upstream, metrics=metrics)
     connectors = ConnectorService(
-        db, upstream=upstream, teams=teams, audit=audit, settings=settings.upstream
+        db,
+        upstream=upstream,
+        teams=teams,
+        audit=audit,
+        settings=settings.upstream,
+        cipher=CredentialCipher(settings.upstream.credential_keys),
     )
     rate_limiter = RateLimiter(db, metrics, enabled=settings.rate_limit.enabled)
     return Container(

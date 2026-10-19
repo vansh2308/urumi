@@ -35,11 +35,22 @@ from gateway.db.models import (
     TeamMembership,
     TeamRole,
 )
-from gateway.errors import ConflictError, InvalidInputError, NotFoundError, PermissionDeniedError
+from gateway.errors import (
+    ConflictError,
+    InvalidInputError,
+    NotFoundError,
+    PermissionDeniedError,
+    UpstreamAuthError,
+)
 from gateway.services.audit import AuditLog
 from gateway.services.principal import Principal
 from gateway.services.teams import TeamContext, TeamService
 from gateway.upstream.client import McpUpstreamClient, ServerProbe, UpstreamTarget
+from gateway.upstream.credentials import (
+    CredentialCipher,
+    CredentialUnavailableError,
+    UpstreamCredential,
+)
 
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 TOOL_NAME_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,128}$")
@@ -85,6 +96,7 @@ class NewConnector:
     description: str = ""
     timeout_seconds: float | None = None
     max_concurrency: int | None = None
+    credential: UpstreamCredential | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +107,8 @@ class ConnectorChange:
     enabled: bool | None = None
     timeout_seconds: float | None = None
     max_concurrency: int | None = None
+    credential: UpstreamCredential | None = None
+    clear_credential: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,16 +131,6 @@ class GrantView:
     connector_slug: str
     tools: ToolSet
     updated_at: datetime
-
-
-def target_of(connector: Connector) -> UpstreamTarget:
-    return UpstreamTarget(
-        connector_id=connector.id,
-        slug=connector.slug,
-        url=connector.url,
-        timeout_seconds=connector.timeout_seconds,
-        max_concurrency=connector.max_concurrency,
-    )
 
 
 def key_restriction(principal: Principal, slug: str) -> ToolSet | None:
@@ -160,12 +164,38 @@ class ConnectorService:
         teams: TeamService,
         audit: AuditLog,
         settings: UpstreamSettings,
+        cipher: CredentialCipher,
     ) -> None:
         self._db = db
         self._upstream = upstream
         self._teams = teams
         self._audit = audit
         self._settings = settings
+        self._cipher = cipher
+
+    def target_of(self, connector: Connector) -> UpstreamTarget:
+        """The upstream call target, with the connector's credential decrypted."""
+        headers: dict[str, str] = {}
+        if connector.credential_header and connector.credential_ciphertext:
+            try:
+                value = self._cipher.decrypt(connector.credential_ciphertext)
+            except CredentialUnavailableError as exc:
+                raise UpstreamAuthError(
+                    "The connector's credential cannot be used; a platform admin must set it again."
+                ) from exc
+            headers[connector.credential_header] = value
+        return UpstreamTarget(
+            connector_id=connector.id,
+            slug=connector.slug,
+            url=connector.url,
+            timeout_seconds=connector.timeout_seconds,
+            max_concurrency=connector.max_concurrency,
+            headers=headers,
+        )
+
+    def _apply_credential(self, connector: Connector, credential: UpstreamCredential) -> None:
+        connector.credential_header = credential.header_name
+        connector.credential_ciphertext = self._cipher.encrypt(credential.value)
 
     # --- platform registry (platform admins) ---------------------------------------------------
 
@@ -208,6 +238,8 @@ class ConnectorService:
             max_concurrency=spec.max_concurrency or self._settings.default_max_concurrency,
             created_by_user_id=principal.user_id,
         )
+        if spec.credential is not None:
+            self._apply_credential(connector, spec.credential)
         async with self._db.transaction() as session:
             session.add(connector)
             try:
@@ -220,7 +252,7 @@ class ConnectorService:
                 actor=principal,
                 target_type="connector",
                 target_id=connector.id,
-                details={"slug": connector.slug},
+                details={"slug": connector.slug, "credential": spec.credential is not None},
             )
         return connector
 
@@ -257,12 +289,24 @@ class ConnectorService:
             values["timeout_seconds"] = self._check_timeout(change.timeout_seconds)
         if change.max_concurrency is not None:
             values["max_concurrency"] = change.max_concurrency
+        if change.credential is not None and change.clear_credential:
+            raise InvalidInputError("Set a credential or clear it, not both.")
         async with self._db.transaction() as session:
             connector = await session.get(Connector, connector_id, with_for_update=True)
             if connector is None:
                 raise NotFoundError("Connector not found.")
             for key, value in values.items():
                 setattr(connector, key, value)
+            details: dict[str, Any] = {k: v for k, v in values.items() if k != "url"}
+            if "url" in values:
+                details["url_changed"] = True
+            if change.credential is not None:
+                self._apply_credential(connector, change.credential)
+                details["credential"] = "set"
+            elif change.clear_credential:
+                connector.credential_header = None
+                connector.credential_ciphertext = None
+                details["credential"] = "cleared"
             connector.updated_at = datetime.now(UTC)
             self._audit.add(
                 session,
@@ -270,15 +314,33 @@ class ConnectorService:
                 actor=principal,
                 target_type="connector",
                 target_id=connector.id,
-                details={k: v for k, v in values.items() if k != "url"}
-                | ({"url_changed": True} if "url" in values else {}),
+                details=details,
+            )
+        self._upstream.invalidate(connector_id)
+        return connector
+
+    async def remove(self, principal: Principal, connector_id: uuid.UUID) -> Connector:
+        """Delete a connector with its team policies and member grants (platform admin)."""
+        self._require_platform_admin(principal)
+        async with self._db.transaction() as session:
+            connector = await session.get(Connector, connector_id, with_for_update=True)
+            if connector is None:
+                raise NotFoundError("Connector not found.")
+            await session.delete(connector)
+            self._audit.add(
+                session,
+                action="connector.remove",
+                actor=principal,
+                target_type="connector",
+                target_id=connector.id,
+                details={"slug": connector.slug},
             )
         self._upstream.invalidate(connector_id)
         return connector
 
     async def probe(self, principal: Principal, connector_id: uuid.UUID) -> ServerProbe:
         connector = await self.get(principal, connector_id)
-        return await self._upstream.probe(target_of(connector))
+        return await self._upstream.probe(self.target_of(connector))
 
     # --- team policy (team admins) -------------------------------------------------------------
 
@@ -566,7 +628,7 @@ class ConnectorService:
             raise NotFoundError("Connector not found or not enabled for this team.")
         connector, team_connector = row
         return ConnectorAccess(
-            target=target_of(connector),
+            target=self.target_of(connector),
             tools=ToolSet.of(team_connector.allow_all_tools, team_connector.allowed_tools),
         )
 

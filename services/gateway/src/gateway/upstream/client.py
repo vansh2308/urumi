@@ -15,8 +15,9 @@ import contextlib
 import logging
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import Any
 
 import anyio
@@ -30,6 +31,7 @@ from gateway import __version__
 from gateway.config import UpstreamSettings
 from gateway.context import REQUEST_ID_HEADER, current_request_id
 from gateway.errors import (
+    UpstreamAuthError,
     UpstreamBusyError,
     UpstreamError,
     UpstreamProtocolError,
@@ -49,6 +51,8 @@ class UpstreamTarget:
     url: str
     timeout_seconds: float
     max_concurrency: int
+    # The connector's static credential header, decrypted. Never logged (repr=False).
+    headers: Mapping[str, str] = field(default_factory=dict, repr=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +63,17 @@ class ServerProbe:
     tools: list[mcp_types.Tool]
 
 
+# (origin, headers) of the upstream call running in this task. The pooled client is shared by
+# every connector, so per-connector credentials ride on the call's context instead of the client.
+_call_headers: ContextVar[tuple[str, Mapping[str, str]] | None] = ContextVar(
+    "upstream_call_headers", default=None
+)
+
+
+def _origin(url: httpx.URL) -> str:
+    return f"{url.scheme}://{url.host}:{url.port or (443 if url.scheme == 'https' else 80)}"
+
+
 _LOCAL_ADDRESS = {"auto": None, "ipv4": "0.0.0.0", "ipv6": "::"}  # noqa: S104 - bind side only
 
 
@@ -66,6 +81,11 @@ def build_upstream_http_client(settings: UpstreamSettings) -> httpx.AsyncClient:
     async def add_request_id(request: httpx.Request) -> None:
         if (rid := current_request_id()) is not None:
             request.headers[REQUEST_ID_HEADER] = rid
+
+    async def add_credential(request: httpx.Request) -> None:
+        # Only to the connector's own origin: a credential never follows a request elsewhere.
+        if (call := _call_headers.get()) is not None and call[0] == _origin(request.url):
+            request.headers.update(call[1])
 
     transport = httpx.AsyncHTTPTransport(
         limits=httpx.Limits(
@@ -86,7 +106,7 @@ def build_upstream_http_client(settings: UpstreamSettings) -> httpx.AsyncClient:
         ),
         follow_redirects=False,  # never let an upstream bounce the gateway somewhere else
         headers={"User-Agent": f"urumi-gateway/{__version__}"},
-        event_hooks={"request": [add_request_id]},
+        event_hooks={"request": [add_request_id, add_credential]},
         trust_env=False,
     )
 
@@ -150,6 +170,7 @@ class McpUpstreamClient:
         operation: Callable[[ClientSession, mcp_types.InitializeResult], Awaitable[T]],
     ) -> T:
         async with self._slot(target):
+            token = _call_headers.set((_origin(httpx.URL(target.url)), target.headers))
             try:
                 with anyio.fail_after(target.timeout_seconds):
                     async with (
@@ -168,6 +189,8 @@ class McpUpstreamClient:
                     extra={"connector": target.slug, "reason": error.code, "error": _leaf(exc)},
                 )
                 raise error from exc
+            finally:
+                _call_headers.reset(token)
 
     @contextlib.asynccontextmanager
     async def _slot(self, target: UpstreamTarget) -> AsyncIterator[None]:
@@ -226,6 +249,11 @@ def _classify(exc: BaseException) -> UpstreamError:  # noqa: PLR0911 - flat disp
         return UpstreamTimeoutError("The MCP server did not respond in time.")
     if isinstance(exc, httpx.HTTPStatusError):
         status = exc.response.status_code
+        if status in {401, 403}:
+            return UpstreamAuthError(
+                f"The MCP server rejected the gateway's credential (HTTP {status}). "
+                "Check the connector's credential."
+            )
         if status >= 500 or status == 429:
             return UpstreamUnavailableError(f"The MCP server is unavailable (HTTP {status}).")
         return UpstreamProtocolError(f"The MCP server refused the connection (HTTP {status}).")

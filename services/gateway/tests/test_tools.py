@@ -10,7 +10,7 @@ import httpx
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
-from tests.conftest import BASE_URL, AppClient, bearer, build_world, create_key, signup
+from tests.conftest import BASE_URL, AppClient, bearer, build_world, create_key, signup, sql
 
 
 def _call_path(team_id: str, slug: str, tool: str) -> str:
@@ -64,7 +64,7 @@ async def test_probe_lists_upstream_tools(
         )
     assert probe.status_code == 200
     assert probe.json()["server_name"] == "demo"
-    assert {t["name"] for t in probe.json()["tools"]} == {"echo", "add", "fail"}
+    assert {t["name"] for t in probe.json()["tools"]} == {"echo", "add", "fail", "seen_token"}
 
 
 async def test_discovery_and_invocation_follow_member_grants(
@@ -262,3 +262,107 @@ async def test_usage_and_audit_are_recorded_with_access_limits(
     assert "api_key.create" in actions or any(a.startswith("api_key") for a in actions)
     assert key["key"] not in admin_audit.text
     assert outsider_usage.status_code == 404
+
+
+async def test_connector_credential_is_sent_upstream_but_never_returned(
+    app_client: AppClient, database_dsn: str, upstream_url: str
+) -> None:
+    secret = "s3cr3t-upstream-token"
+    async with app_client() as client:
+        world = await build_world(client, database_dsn, upstream_url, member_tools=["echo"])
+        slug = f"cred-{world.slug}"
+        registered = await client.post(
+            "/v1/connectors",
+            headers=world.admin.auth,
+            json={
+                "slug": slug,
+                "display_name": "With credential",
+                "url": upstream_url,
+                "credential": {
+                    "type": "header",
+                    "header_name": "X-Upstream-Token",
+                    "value": secret,
+                },
+            },
+        )
+        await client.put(
+            f"/v1/teams/{world.team_id}/connectors/{slug}",
+            headers=world.admin.auth,
+            json={"allow_all_tools": True},
+        )
+        key = await create_key(client, world.admin, world.team_id)
+        call = await client.post(
+            _call_path(world.team_id, slug, "seen_token"),
+            headers=bearer(key["key"]),
+            json={"arguments": {}},
+        )
+        listed = await client.get("/v1/connectors", headers=world.admin.auth)
+        stored = await sql(
+            database_dsn,
+            "SELECT credential_header, credential_ciphertext FROM connectors WHERE slug = $1",
+            slug,
+        )
+        cleared = await client.patch(
+            f"/v1/connectors/{registered.json()['id']}",
+            headers=world.admin.auth,
+            json={"clear_credential": True},
+        )
+        after_clear = await client.post(
+            _call_path(world.team_id, slug, "seen_token"),
+            headers=bearer(key["key"]),
+            json={"arguments": {}},
+        )
+
+    assert registered.status_code == 201, registered.text
+    assert registered.json()["credential"] == {
+        "header_name": "X-Upstream-Token",
+        "configured": True,
+    }
+    assert call.status_code == 200, call.text
+    assert call.json()["content"][0]["text"] == secret
+    assert secret not in listed.text and secret not in registered.text
+    assert stored[0]["credential_header"] == "X-Upstream-Token"
+    assert secret not in stored[0]["credential_ciphertext"]  # encrypted at rest
+    assert cleared.status_code == 200 and cleared.json().get("credential") is None
+    assert after_clear.json()["content"][0]["text"] == ""
+
+
+async def test_reserved_credential_headers_are_refused(
+    app_client: AppClient, database_dsn: str, upstream_url: str
+) -> None:
+    async with app_client() as client:
+        world = await build_world(client, database_dsn, upstream_url, member_tools=["echo"])
+        response = await client.post(
+            "/v1/connectors",
+            headers=world.admin.auth,
+            json={
+                "slug": f"bad-{world.slug}",
+                "display_name": "Bad",
+                "url": upstream_url,
+                "credential": {"type": "header", "header_name": "Host", "value": "evil"},
+            },
+        )
+    assert response.status_code == 422
+
+
+async def test_removing_a_connector_hides_its_tools(
+    app_client: AppClient, database_dsn: str, upstream_url: str
+) -> None:
+    async with app_client() as client:
+        world = await build_world(client, database_dsn, upstream_url, member_tools=["echo"])
+        key = await create_key(client, world.member, world.team_id)
+        by_member = await client.delete(
+            f"/v1/connectors/{world.connector_id}", headers=world.member.auth
+        )
+        removed = await client.delete(
+            f"/v1/connectors/{world.connector_id}", headers=world.admin.auth
+        )
+        call = await client.post(
+            _call_path(world.team_id, world.slug, "echo"),
+            headers=bearer(key["key"]),
+            json={"arguments": {"text": "hi"}},
+        )
+
+    assert by_member.status_code == 403
+    assert removed.status_code == 204
+    assert call.status_code == 404

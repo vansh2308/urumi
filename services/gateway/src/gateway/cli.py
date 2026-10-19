@@ -1,4 +1,4 @@
-"""Operator CLI: ``gateway-admin``. Needs only ``DB_URL``.
+"""Operator CLI: ``gateway-admin``. Needs only ``DB_URL`` (key generation needs nothing).
 
 Platform-admin status (which allows registering MCP connectors) is never grantable through the
 API, so the first operator is bootstrapped here, by someone with database access.
@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import sys
 
+from cryptography.fernet import Fernet
 from sqlalchemy import update
 
 from gateway.config import DatabaseSettings
@@ -52,7 +53,12 @@ def main() -> None:
     ):
         cmd = sub.add_parser(name, help=help_text)
         cmd.add_argument("email")
+    sub.add_parser("generate-credential-key", help="print a new key for UPSTREAM_CREDENTIAL_KEYS")
     args = parser.parse_args()
+
+    if args.command == "generate-credential-key":
+        print(Fernet.generate_key().decode())
+        return
 
     found = asyncio.run(
         _set_platform_admin(args.email, value=args.command == "grant-platform-admin")

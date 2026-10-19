@@ -17,6 +17,7 @@ from sqlalchemy import (
     Integer,
     MetaData,
     String,
+    Text,
     UniqueConstraint,
     func,
     text,
@@ -25,7 +26,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Bumped by every migration; /health/ready fails until the database is at this revision.
-SCHEMA_REVISION = "0004"
+SCHEMA_REVISION = "0005"
 # Own version table so the gateway can share a PostgreSQL database with other services.
 VERSION_TABLE = "gateway_alembic_version"
 
@@ -248,6 +249,10 @@ class Connector(Base):
     description: Mapped[str] = mapped_column(String(500), default="")
     url: Mapped[str] = mapped_column(String(500))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Optional static credential sent as one header on every upstream call. The value is
+    # encrypted (see gateway.upstream.credentials) and never leaves the gateway.
+    credential_header: Mapped[str | None] = mapped_column(String(64))
+    credential_ciphertext: Mapped[str | None] = mapped_column(Text)
     timeout_seconds: Mapped[float] = mapped_column(Float)
     max_concurrency: Mapped[int] = mapped_column(Integer)
     created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(

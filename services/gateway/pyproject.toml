@@ -17,6 +17,7 @@ dependencies = [
     "alembic>=1.16,<2.0",
     "argon2-cffi>=25.1,<26.0",
     "prometheus-client>=0.22,<1.0",
+    "cryptography (>=44)",
 ]
 
 [project.scripts]

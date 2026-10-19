@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, EmailStr, Field, SecretStr
 
 from gateway.db.models import ApiKeyScope, TeamRole
+from gateway.errors import InvalidInputError
+from gateway.upstream.credentials import UpstreamCredential
 
 
 class RequestModel(BaseModel):
@@ -203,6 +205,34 @@ Slug = Annotated[str, Field(pattern=r"^[a-z0-9][a-z0-9-]{0,62}$")]
 ToolName = Annotated[str, Field(pattern=r"^[A-Za-z0-9_.\-]{1,128}$")]
 
 
+class CredentialIn(RequestModel):
+    """A static credential the gateway sends to the upstream on every call. Write-only."""
+
+    type: Literal["bearer", "header"] = Field(
+        description="'bearer' sends 'Authorization: Bearer <value>'; 'header' sends "
+        "'<header_name>: <value>'."
+    )
+    header_name: Annotated[str, Field(max_length=64)] | None = Field(
+        default=None, description="Required for type 'header', e.g. X-Api-Key."
+    )
+    value: SecretStr = Field(description="The token or header value. Never returned.")
+
+    def to_domain(self) -> UpstreamCredential:
+        raw = self.value.get_secret_value()
+        if self.type == "bearer":
+            if self.header_name is not None:
+                raise InvalidInputError("header_name is only used with type 'header'.")
+            return UpstreamCredential.bearer(raw)
+        if not self.header_name:
+            raise InvalidInputError("header_name is required for type 'header'.")
+        return UpstreamCredential.header(self.header_name, raw)
+
+
+class CredentialOut(BaseModel):
+    header_name: str
+    configured: bool = True
+
+
 class RegisterConnectorRequest(RequestModel):
     slug: Slug = Field(description="Stable identifier clients use, e.g. 'woocommerce'.")
     display_name: Annotated[str, Field(min_length=1, max_length=100)]
@@ -213,6 +243,7 @@ class RegisterConnectorRequest(RequestModel):
     )
     timeout_seconds: float | None = Field(default=None, gt=0)
     max_concurrency: int | None = Field(default=None, ge=1, le=1000)
+    credential: CredentialIn | None = None
 
 
 class UpdateConnectorRequest(RequestModel):
@@ -222,6 +253,10 @@ class UpdateConnectorRequest(RequestModel):
     enabled: bool | None = None
     timeout_seconds: float | None = Field(default=None, gt=0)
     max_concurrency: int | None = Field(default=None, ge=1, le=1000)
+    credential: CredentialIn | None = Field(
+        default=None, description="Replace the connector's credential."
+    )
+    clear_credential: bool = Field(default=False, description="Remove the credential.")
 
 
 class ConnectorOut(BaseModel):
@@ -233,6 +268,9 @@ class ConnectorOut(BaseModel):
     description: str
     enabled: bool
     url: str | None = None
+    credential: CredentialOut | None = Field(
+        default=None, description="The credential's header name only; the value is never shown."
+    )
     timeout_seconds: float | None = None
     max_concurrency: int | None = None
     created_at: datetime | None = None
