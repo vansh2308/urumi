@@ -32,6 +32,7 @@ from gateway.config import UpstreamSettings
 from gateway.context import REQUEST_ID_HEADER, current_request_id
 from gateway.errors import (
     UpstreamAuthError,
+    UpstreamBlockedError,
     UpstreamBusyError,
     UpstreamError,
     UpstreamProtocolError,
@@ -40,6 +41,7 @@ from gateway.errors import (
     UpstreamUnavailableError,
 )
 from gateway.metrics import Metrics
+from gateway.upstream.ssrf import DestinationBlockedError, check_destination
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,8 @@ class UpstreamTarget:
     max_concurrency: int
     # The connector's static credential header, decrypted. Never logged (repr=False).
     headers: Mapping[str, str] = field(default_factory=dict, repr=False)
+    # Re-check where the host resolves before connecting (admin-supplied URLs; see ssrf.py).
+    verify_destination: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +173,20 @@ class McpUpstreamClient:
         target: UpstreamTarget,
         operation: Callable[[ClientSession, mcp_types.InitializeResult], Awaitable[T]],
     ) -> T:
+        if target.verify_destination:
+            try:
+                await check_destination(target.url, self._settings)
+            except DestinationBlockedError as exc:
+                self._metrics.upstream_failures.labels(
+                    connector=target.slug, reason="upstream_blocked"
+                ).inc()
+                logger.warning(
+                    "upstream destination blocked",
+                    extra={"connector": target.slug, "reason": exc.reason},
+                )
+                raise UpstreamBlockedError(
+                    f"The connector's address is not allowed: {exc.reason}."
+                ) from exc
         async with self._slot(target):
             token = _call_headers.set((_origin(httpx.URL(target.url)), target.headers))
             try:

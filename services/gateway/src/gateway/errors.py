@@ -118,6 +118,13 @@ class UpstreamRejectedError(UpstreamError):
     status_code = 502
 
 
+class UpstreamBlockedError(UpstreamError):
+    """The connector's host resolves to an address the gateway may not connect to."""
+
+    code = "upstream_blocked"
+    status_code = 502
+
+
 class UpstreamAuthError(UpstreamError):
     """The upstream refused the gateway's credential (HTTP 401/403), or it cannot be used."""
 
