@@ -9,8 +9,11 @@ import type {
   CatalogEntry,
   Connector,
   CreateApiKeyRequest,
+  DeployHostedServerRequest,
   Grant,
   Health,
+  HostedServer,
+  HostedSettings,
   Invitation,
   Invocation,
   IssuedApiKey,
@@ -29,6 +32,7 @@ import type {
   TeamRole,
   ToolSet,
   UpdateConnectorRequest,
+  UpdateHostedServerRequest,
   UpdateTeamRequest,
   UsageSummary,
   User,
@@ -132,6 +136,18 @@ export const gateway = {
       }),
   },
 
+  hosted: {
+    settings: (token: string) => get<HostedSettings>(token, "/v1/hosted-servers/settings"),
+    list: (token: string) => get<HostedServer[]>(token, "/v1/hosted-servers"),
+    get: (token: string, id: string) => get<HostedServer>(token, `/v1/hosted-servers/${id}`),
+    deploy: (token: string, body: DeployHostedServerRequest) =>
+      post<HostedServer>(token, "/v1/hosted-servers", body),
+    update: (token: string, id: string, body: UpdateHostedServerRequest) =>
+      patch<HostedServer>(token, `/v1/hosted-servers/${id}`, body),
+    restart: (token: string, id: string) =>
+      post<HostedServer>(token, `/v1/hosted-servers/${id}/restart`),
+  },
+
   connectors: {
     // Platform registry
     list: (token: string) => get<Connector[]>(token, "/v1/connectors"),
@@ -140,6 +156,7 @@ export const gateway = {
       post<Connector>(token, "/v1/connectors", body),
     update: (token: string, id: string, body: UpdateConnectorRequest) =>
       patch<Connector>(token, `/v1/connectors/${id}`, body),
+    remove: (token: string, id: string) => del(token, `/v1/connectors/${id}`),
     probe: (token: string, id: string) => post<Probe>(token, `/v1/connectors/${id}/probe`),
 
     // Team policy, discovery and grants

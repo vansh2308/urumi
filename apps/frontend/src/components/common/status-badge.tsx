@@ -13,6 +13,7 @@ const TONES: Record<string, Tone> = {
   ok: "positive",
   pending: "warning",
   running: "warning",
+  deploying: "warning",
   unknown: "warning",
   step_limit: "warning",
   tool_limit: "warning",
@@ -22,6 +23,7 @@ const TONES: Record<string, Tone> = {
   expired: "neutral",
   revoked: "neutral",
   disabled: "neutral",
+  stopped: "neutral",
   denied: "negative",
   failure: "negative",
   failed: "negative",
@@ -29,6 +31,7 @@ const TONES: Record<string, Tone> = {
   error: "negative",
   not_ready: "negative",
   unreachable: "negative",
+  missing: "negative",
 }
 
 const DOT: Record<Tone, string> = {

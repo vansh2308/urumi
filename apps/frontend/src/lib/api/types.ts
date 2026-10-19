@@ -127,12 +127,22 @@ export interface Connector {
   description: string
   enabled: boolean
   // Platform admins only:
+  kind?: ConnectorKind
   url?: string
+  /** Header name of the stored credential; the value is never returned. */
+  credential?: { header_name: string; configured: boolean } | null
   timeout_seconds?: number
   max_concurrency?: number
   created_at?: string
   updated_at?: string
 }
+
+export type ConnectorKind = "remote" | "hosted"
+
+/** A static credential the gateway sends upstream. Write-only. */
+export type CredentialInput =
+  | { type: "bearer"; value: string }
+  | { type: "header"; header_name: string; value: string }
 
 export interface RegisterConnectorRequest {
   slug: string
@@ -141,10 +151,74 @@ export interface RegisterConnectorRequest {
   url: string
   timeout_seconds?: number
   max_concurrency?: number
+  credential?: CredentialInput
 }
 
 export type UpdateConnectorRequest = Partial<Omit<RegisterConnectorRequest, "slug">> & {
   enabled?: boolean
+  clear_credential?: boolean
+}
+
+// --- hosted MCP servers --------------------------------------------------------------------------
+
+export type HostedPhase = "deploying" | "ready" | "failed" | "stopped" | "missing" | "unknown"
+export type HostedEgress = "internet" | "none"
+
+export interface HostedSettings {
+  enabled: boolean
+  namespace: string
+  allowed_images: string[]
+  default_cpu_millicores: number
+  max_cpu_millicores: number
+  default_memory_mib: number
+  max_memory_mib: number
+  max_servers: number
+}
+
+export interface HostedServer {
+  connector: Connector
+  image: string
+  port: number
+  path: string
+  args: string[]
+  env: Record<string, string>
+  secret_env_keys: string[]
+  cpu_millicores: number
+  memory_mib: number
+  egress: HostedEgress
+  namespace: string
+  k8s_name: string
+  status: { phase: HostedPhase; reason: string | null; ready_replicas: number; restarts: number }
+  created_at: string
+  updated_at: string
+}
+
+export interface DeployHostedServerRequest {
+  slug: string
+  display_name: string
+  description?: string
+  image: string
+  port: number
+  path?: string
+  args?: string[]
+  env?: Record<string, string>
+  secret_env?: Record<string, string>
+  credential?: CredentialInput
+  cpu_millicores?: number
+  memory_mib?: number
+  egress?: HostedEgress
+  timeout_seconds?: number
+}
+
+export interface UpdateHostedServerRequest {
+  image?: string
+  args?: string[]
+  env?: Record<string, string>
+  /** Values to set; null removes a variable. Others are kept. */
+  secret_env?: Record<string, string | null>
+  cpu_millicores?: number
+  memory_mib?: number
+  egress?: HostedEgress
 }
 
 export interface ToolSummary {

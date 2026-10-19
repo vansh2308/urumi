@@ -1,7 +1,7 @@
 import type { ColumnDef } from "@tanstack/react-table"
-import { ArrowLeftIcon, PencilIcon, PlugZapIcon, PowerIcon, RefreshCwIcon } from "lucide-react"
+import { ArrowLeftIcon, PencilIcon, PlugZapIcon, PowerIcon, RefreshCwIcon, Trash2Icon } from "lucide-react"
 import { useState, type ReactNode } from "react"
-import { Link, useParams } from "react-router"
+import { Link, useNavigate, useParams } from "react-router"
 
 import { CopyButton } from "@/components/common/copy-button"
 import { PageHeader } from "@/components/common/page-header"
@@ -15,6 +15,7 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Skeleton } from "@/components/ui/skeleton"
 import { describeAccess } from "@/features/connectors/access"
 import { ConnectorFormDialog } from "@/features/connectors/connector-form-dialog"
+import { HostedDeploymentCard } from "@/features/connectors/hosted-deployment-card"
 import { TeamPolicyDialog } from "@/features/connectors/team-policy-dialog"
 import { useConnectorActions } from "@/features/connectors/use-connector-actions"
 import { riskOf } from "@/features/tools/schema"
@@ -24,6 +25,7 @@ import { useUsageSummary } from "@/hooks/queries/use-activity"
 import {
   useCatalog,
   useConnectorTools,
+  useHostedServers,
   useProbeConnector,
   useRegistry,
   useTeamConnectors,
@@ -51,13 +53,16 @@ export default function McpServerDetailPage() {
   const registry = useRegistry()
   const teamConnectors = useTeamConnectors(teamId)
   const connector = registry.data?.find((c) => c.slug === serverId) ?? null
+  const navigate = useNavigate()
+  const hostedList = useHostedServers(isPlatformAdmin && connector?.kind === "hosted")
+  const hosted = hostedList.data?.find((h) => h.connector.id === connector?.id) ?? null
   const team = teamConnectors.data?.find((c) => c.slug === serverId) ?? null
   const hasAccess = Boolean(team && (team.your_access.allow_all_tools || team.your_access.tools.length))
   const tools = useConnectorTools(teamId, serverId, hasAccess)
   const catalog = useCatalog(teamId, serverId, isTeamAdmin && team !== null)
   const usage = useUsageSummary(teamId, { group_by: "connector", connector: serverId, since: SINCE })
   const probe = useProbeConnector()
-  const actions = useConnectorActions(teamId)
+  const actions = useConnectorActions(teamId, () => navigate("/mcp-servers"))
   const [editing, setEditing] = useState(false)
   const [policyOpen, setPolicyOpen] = useState(false)
   const [selected, setSelected] = useState<McpTool | null>(null)
@@ -170,6 +175,9 @@ export default function McpServerDetailPage() {
                   onClick={() => actions.setEnabled(connector, !connector.enabled)}
                 >
                   <PowerIcon /> {connector.enabled ? "Disable" : "Enable"}
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => actions.deleteServer(connector)}>
+                  <Trash2Icon /> Delete
                 </Button>
               </>
             )}
@@ -284,6 +292,17 @@ export default function McpServerDetailPage() {
                   {connector.url && <CopyButton value={connector.url} label="Copy URL" />}
                 </span>
               </Meta>
+              <Meta label="Type">{connector.kind === "hosted" ? "Hosted (platform-managed URL)" : "Registered by URL"}</Meta>
+              <Meta label="Credential">
+                {connector.credential ? (
+                  <span>
+                    <span className="font-mono text-xs">{connector.credential.header_name}</span>{" "}
+                    <span className="text-muted-foreground">(stored encrypted, never shown)</span>
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground">None</span>
+                )}
+              </Meta>
               <Meta label="Timeout">{connector.timeout_seconds ? `${connector.timeout_seconds} s` : "Default"}</Meta>
               <Meta label="Max concurrency">{connector.max_concurrency ?? "Default"}</Meta>
               <Meta label="Connector ID">
@@ -308,6 +327,8 @@ export default function McpServerDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {isPlatformAdmin && hosted && <HostedDeploymentCard server={hosted} />}
 
       <section className="space-y-3">
         <h2 className="text-base font-medium">Your tools</h2>
