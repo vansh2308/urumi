@@ -108,6 +108,8 @@ networkPolicy:
   ingress: []
   # Raw NetworkPolicyEgressRule entries. Empty = egress unrestricted (no Egress policy type).
   egress: []
+  # Appended to `egress`, for per-environment additions (Helm replaces lists across files).
+  extraEgress: []
 
 # Database migrations as a Helm pre-install/pre-upgrade hook, with the same image. It gets only
 # `migration.env` and the `secretEnv` entries named in `secretNames` (least privilege; the release

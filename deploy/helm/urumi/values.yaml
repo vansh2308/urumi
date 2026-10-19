@@ -18,6 +18,32 @@ global:
   # One immutable tag (e.g. the git SHA) for every image; a component's image.tag overrides it.
   imageTag: ""
 
+# --- Egress building blocks -------------------------------------------------------------------------
+# Every first-party pod's NetworkPolicy also restricts egress (deny by default). These anchors are
+# reused below; anything not listed (other namespaces, node ports, private ranges) is refused.
+x-egress:
+  dns: &egressDns
+    to:
+      - namespaceSelector:
+          matchLabels:
+            kubernetes.io/metadata.name: kube-system
+        podSelector:
+          matchLabels:
+            k8s-app: kube-dns
+    ports:
+      - { port: 53, protocol: UDP }
+      - { port: 53, protocol: TCP }
+  # Public internet only (managed PostgreSQL, LLM provider, HTTPS upstreams): private, CGNAT and
+  # link-local (cloud metadata) ranges are excluded.
+  publicHttpsAndPostgres: &egressPublic
+    to:
+      - ipBlock:
+          cidr: 0.0.0.0/0
+          except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16]
+    ports:
+      - { port: 443, protocol: TCP }
+      - { port: 5432, protocol: TCP }
+
 # --- WooCommerce MCP server ----------------------------------------------------------------------
 woocommerce-mcp:
   enabled: true
@@ -61,6 +87,18 @@ woocommerce-mcp:
           - podSelector:
               matchLabels:
                 app.kubernetes.io/name: gateway
+    egress:
+      - *egressDns
+      - *egressPublic
+      # The store, inside the cluster (WordPress container ports).
+      - to:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/instance: store
+                app.kubernetes.io/name: wordpress
+        ports:
+          - { port: 8080, protocol: TCP }
+          - { port: 8443, protocol: TCP }
 
 # --- Gateway --------------------------------------------------------------------------------------
 gateway:
@@ -118,6 +156,29 @@ gateway:
           - podSelector:
               matchLabels:
                 app.kubernetes.io/name: agent
+    # The Kubernetes API rule (hosted servers) is per environment: see values-<env>.yaml.
+    egress:
+      - *egressDns
+      - *egressPublic
+      - to:
+          - ipBlock:
+              cidr: 0.0.0.0/0
+              except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16]
+        ports:
+          - { port: 80, protocol: TCP }  # plain-HTTP remote MCP servers, if allow-listed
+      - to:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/name: woocommerce-mcp
+        ports:
+          - { port: 8000, protocol: TCP }
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: urumi-mcp
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/component: hosted-mcp
 
 # --- Hosted MCP servers ----------------------------------------------------------------------------
 # Namespace, quota, default-deny NetworkPolicy and the gateway's Role for MCP servers that admins
@@ -181,6 +242,15 @@ agent:
           - podSelector:
               matchLabels:
                 app.kubernetes.io/name: frontend
+    egress:
+      - *egressDns
+      - *egressPublic  # LLM provider and the agent database
+      - to:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/name: gateway
+        ports:
+          - { port: 8100, protocol: TCP }
 
 # --- Dashboard ------------------------------------------------------------------------------------
 frontend:
@@ -230,3 +300,17 @@ frontend:
             podSelector:
               matchLabels:
                 app.kubernetes.io/name: traefik
+    egress:
+      - *egressDns
+      - to:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/name: gateway
+        ports:
+          - { port: 8100, protocol: TCP }
+      - to:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/name: agent
+        ports:
+          - { port: 8201, protocol: TCP }

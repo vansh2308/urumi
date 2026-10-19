@@ -29,6 +29,11 @@ woocommerce-mcp:
 
 gateway:
   <<: *replicated
+  networkPolicy:
+    # The Kubernetes API server (hosted MCP servers): your node's IP, port 6443 on k3s.
+    extraEgress:
+      - to: [{ ipBlock: { cidr: 10.0.0.0/8 } }]  # replace with <node-ip>/32
+        ports: [{ port: 6443, protocol: TCP }]
   image:
     repository: registry.example.com/urumi/gateway
   env:
