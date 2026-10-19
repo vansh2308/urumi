@@ -14,6 +14,7 @@ there is no client-supplied URL or routing anywhere.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import uuid
 from dataclasses import dataclass
@@ -38,17 +39,19 @@ from gateway.db.models import (
     TeamRole,
 )
 from gateway.errors import (
+    AppError,
     ConflictError,
     InvalidInputError,
     NotFoundError,
     PermissionDeniedError,
     UpstreamAuthError,
+    UpstreamTimeoutError,
 )
 from gateway.hosted.service import HostedDeployer
 from gateway.services.audit import AuditLog
 from gateway.services.principal import Principal
 from gateway.services.teams import TeamContext, TeamService
-from gateway.upstream.client import McpUpstreamClient, ServerProbe, UpstreamTarget
+from gateway.upstream.client import Exchange, McpUpstreamClient, ServerProbe, UpstreamTarget
 from gateway.upstream.credentials import (
     CredentialCipher,
     CredentialUnavailableError,
@@ -128,6 +131,20 @@ class CatalogEntry:
     title: str | None
     description: str | None
     allowed_for_team: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ConnectorStatus:
+    """Live reachability of one connector, plus what this replica last saw from it."""
+
+    connector: Connector
+    state: str  # connected | unreachable | disabled
+    error_code: str | None
+    error_message: str | None
+    latency_ms: float | None
+    checked_at: datetime
+    last_success_at: datetime | None
+    last_failure: Exchange | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -365,6 +382,44 @@ class ConnectorService:
             )
         self._upstream.invalidate(connector_id)
         return connector
+
+    # --- status (reachability) ---------------------------------------------------------------
+
+    async def registry_status(self, principal: Principal) -> list[ConnectorStatus]:
+        """Every registered connector, disabled ones included (platform admin)."""
+        return await self._statuses(await self.list_registry(principal))
+
+    async def team_status(self, ctx: TeamContext) -> list[ConnectorStatus]:
+        """The team's connectors the caller can see (as in list_team_connectors)."""
+        return await self._statuses([v.connector for v in await self.list_team_connectors(ctx)])
+
+    async def _statuses(self, connectors: list[Connector]) -> list[ConnectorStatus]:
+        return list(await asyncio.gather(*(self._status(c) for c in connectors)))
+
+    async def _status(self, connector: Connector) -> ConnectorStatus:
+        now = datetime.now(UTC)
+        error: AppError | None = None
+        latency: float | None = None
+        if connector.enabled:
+            try:
+                async with asyncio.timeout(self._settings.aggregate_list_timeout_seconds):
+                    latency = await self._upstream.ping(self.target_of(connector))
+            except AppError as exc:
+                error = exc
+            except TimeoutError:
+                error = UpstreamTimeoutError("The MCP server did not respond in time.")
+        health = self._upstream.health(connector.id)
+        state = "disabled" if not connector.enabled else "unreachable" if error else "connected"
+        return ConnectorStatus(
+            connector=connector,
+            state=state,
+            error_code=error.code if error else None,
+            error_message=error.public_message if error else None,
+            latency_ms=round(latency, 1) if latency is not None else None,
+            checked_at=now,
+            last_success_at=health.last_success_at,
+            last_failure=health.last_failure,
+        )
 
     def _hosted_deployer(self) -> HostedDeployer:
         if self._deployer is None:
