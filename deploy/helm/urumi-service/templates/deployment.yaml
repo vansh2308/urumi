@@ -55,6 +55,12 @@ spec:
           args:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- if .Values.preStopSleepSeconds }}
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: {{ .Values.preStopSleepSeconds }}
+          {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.containerPort }}

@@ -23,8 +23,13 @@ strategy:
     maxSurge: 1
     maxUnavailable: 0
 minReadySeconds: 0
-# Must exceed the service's own shutdown grace period (e.g. GATEWAY_SHUTDOWN_GRACE_SECONDS=25).
+# Must exceed preStopSleepSeconds plus the service's own shutdown grace period
+# (e.g. GATEWAY_SHUTDOWN_GRACE_SECONDS=25).
 terminationGracePeriodSeconds: 40
+# A terminating pod keeps serving this long before it gets SIGTERM, while the endpoint removal
+# reaches kube-proxy, Traefik and nginx. Without it, requests routed in that window are refused
+# during rolling updates and rollbacks. 0 disables the hook.
+preStopSleepSeconds: 5
 
 command: []
 args: []
