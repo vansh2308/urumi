@@ -28,7 +28,7 @@ export function ToolsPopover({ toolKey }: { toolKey: ToolKey | null }) {
             Discovered through the gateway with your API key, as offered to the model.
           </div>
         </div>
-        <ScrollArea className="max-h-80">
+        <ScrollArea className="max-h-80 overflow-y-scroll pb-2">
           <div className="space-y-2 p-3">
             {tools.isLoading && <Skeleton className="h-16 w-full" />}
             {tools.error && <ErrorAlert error={tools.error} title="Could not discover tools" />}
