@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.config import AuthSettings
 from gateway.db.engine import Database
-from gateway.db.models import AuditOutcome, AuthSession, User
+from gateway.db.models import ApiKey, AuditOutcome, AuthSession, User
 from gateway.errors import (
     AuthenticationError,
     ConflictError,
@@ -155,6 +155,12 @@ class AuthService:
                 update(AuthSession)
                 .where(AuthSession.id == principal.session_id, AuthSession.revoked_at.is_(None))
                 .values(revoked_at=datetime.now(UTC))
+            )
+            # Dashboard session keys die with the login that issued them.
+            await session.execute(
+                update(ApiKey)
+                .where(ApiKey.session_id == principal.session_id, ApiKey.revoked_at.is_(None))
+                .values(revoked_at=datetime.now(UTC), revoked_by_user_id=principal.user_id)
             )
             self._audit.add(session, action="auth.logout", actor=principal)
 

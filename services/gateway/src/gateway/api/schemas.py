@@ -193,6 +193,9 @@ class ApiKeyOut(BaseModel):
     last_used_at: datetime | None
     revoked_at: datetime | None
     rotated_from_id: uuid.UUID | None
+    session_bound: bool = Field(
+        default=False, description="A dashboard key that ends with the login session."
+    )
 
 
 class IssuedApiKeyOut(ApiKeyOut):

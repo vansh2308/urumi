@@ -34,6 +34,7 @@ def _out(key: ApiKey) -> ApiKeyOut:
         last_used_at=key.last_used_at,
         revoked_at=key.revoked_at,
         rotated_from_id=key.rotated_from_id,
+        session_bound=key.session_id is not None,
     )
 
 
@@ -58,6 +59,16 @@ async def create_api_key(
         ),
     )
     return _issued(issued)
+
+
+@router.post("/session", status_code=status.HTTP_201_CREATED, response_model=IssuedApiKeyOut)
+async def issue_session_key(ctx: TeamSessionDep, container: ContainerDep) -> IssuedApiKeyOut:
+    """Issue the dashboard's key for this login session (tools:read, tools:call, usage:read).
+
+    It expires with the session, replaces the session's previous key in this team, and is
+    revoked on logout. Conversations and usage belong to the user, not the key, so nothing is
+    lost when it is replaced."""
+    return _issued(await container.api_keys.issue_session_key(ctx))
 
 
 @router.get("", response_model=list[ApiKeyOut])
