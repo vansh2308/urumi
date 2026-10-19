@@ -73,6 +73,22 @@ Residual risk: a model can still be misled by convincing text in a *result* it w
 fetch (e.g. a web page). Mitigations above limit the blast radius to the user's own permissions;
 grant write tools sparingly.
 
+## OAuth-connected clients
+
+MCP clients that sign in with OAuth ([oauth.md](oauth.md)) get the approving user's access in one
+team, for an hour at a time, renewable until the user disconnects them or leaves the team.
+
+* **Consent phishing**: anyone can register a client with any name and send a user an approval
+  link. The consent page therefore shows where the browser will return (the redirect host), says
+  that names are self-declared, and asks the user to approve only flows they started; redirect URIs
+  must be HTTPS, loopback or an app scheme. Approving still grants only the user's own access in
+  the chosen team, and every call is audited under them.
+* **Stolen tokens**: an access token lives one hour; refresh tokens rotate and a reused one is
+  rejected; codes are single use, bound to the PKCE verifier, and expire in 5 minutes. Disconnecting
+  an app (or `/revoke`) kills both tokens at once.
+* **Abuse of the public endpoints**: `/register`, `/authorize` and `/token` are rate limited per IP;
+  expired requests and codes are purged.
+
 ## What one team member can do to another
 
 * **Read**: nothing private. Members see their own keys, usage and audit events; team-wide audit,
