@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
 from gateway.api.deps import ContainerDep
@@ -41,5 +41,11 @@ async def ready(container: ContainerDep) -> JSONResponse:
 
 
 @router.get("/metrics", include_in_schema=False)
-async def metrics(container: ContainerDep) -> Response:
+async def metrics(request: Request, container: ContainerDep) -> Response:
+    """Prometheus scrape target. Only for direct (in-cluster) requests: anything that came
+    through the ingress or the dashboard proxy carries X-Forwarded-For and gets 404."""
+    server = container.settings.server
+    proxied = "x-forwarded-for" in request.headers
+    if not server.metrics_enabled or (proxied and not server.metrics_via_proxy):
+        return Response(status_code=404)
     return Response(container.metrics.render(), media_type=CONTENT_TYPE)
