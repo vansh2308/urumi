@@ -26,7 +26,7 @@ from sqlalchemy.dialects.postgresql import ARRAY, INET, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Bumped by every migration; /health/ready fails until the database is at this revision.
-SCHEMA_REVISION = "0006"
+SCHEMA_REVISION = "0007"
 # Own version table so the gateway can share a PostgreSQL database with other services.
 VERSION_TABLE = "gateway_alembic_version"
 
@@ -231,6 +231,11 @@ class ApiKey(Base):
     )
     rotated_from_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("api_keys.id", ondelete="SET NULL")
+    )
+    # Set for a dashboard session key: it expires with that login session and is revoked on
+    # logout or when the dashboard asks for a new one.
+    session_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("auth_sessions.id", ondelete="SET NULL")
     )
 
 

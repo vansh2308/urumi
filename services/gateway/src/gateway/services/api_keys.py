@@ -9,6 +9,11 @@ Security policy:
   Keys are always issued to the caller: nobody can mint a key that acts as another user.
 * Admins may list and revoke any key in their team; members only their own.
 * Only the owner can rotate a key, since rotation hands out a new working secret.
+* A dashboard **session key** belongs to one login session: it lives as long as that session,
+  at most one is active per session and team (issuing a new one revokes the previous), and
+  logging out revokes it. It only carries ``tools:read``, ``tools:call`` and ``usage:read``,
+  so the dashboard's chat and tool runner work without the user pasting a key. It is allowed
+  even when members may not create keys, because nothing outlives the login that minted it.
 * On every request the key must be unexpired and unrevoked, and its owner must still be an
   active member of the key's team. Effective permissions are computed live, so role changes
   and grant changes apply to existing keys immediately.
@@ -27,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.config import ApiKeySettings
 from gateway.db.engine import Database
-from gateway.db.models import ApiKey, ApiKeyScope, Team, TeamMembership, User
+from gateway.db.models import ApiKey, ApiKeyScope, AuthSession, Team, TeamMembership, User
 from gateway.errors import (
     AuthenticationError,
     ConflictError,
@@ -40,6 +45,10 @@ from gateway.services.audit import AuditLog
 from gateway.services.principal import CredentialKind, Principal
 from gateway.services.teams import TeamContext
 
+SESSION_KEY_NAME = "Dashboard session"
+SESSION_KEY_SCOPES = frozenset(
+    {ApiKeyScope.TOOLS_READ, ApiKeyScope.TOOLS_CALL, ApiKeyScope.USAGE_READ}
+)
 TOOL_RESTRICTION_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}/(\*|[A-Za-z0-9_.\-]{1,128})$")
 
 
@@ -110,6 +119,59 @@ class ApiKeyService:
                     "prefix": issued.key.prefix,
                     "scopes": sorted(spec.scopes),
                     "expires_at": issued.key.expires_at.isoformat(),
+                },
+            )
+        return issued
+
+    async def issue_session_key(self, ctx: TeamContext) -> IssuedApiKey:
+        """A fresh key bound to the caller's login session, replacing the previous one."""
+        principal = ctx.principal
+        if principal.credential is not CredentialKind.SESSION or principal.session_id is None:
+            raise PermissionDeniedError("Session keys can only be issued to a logged-in user.")
+        now = datetime.now(UTC)
+        async with self._db.transaction() as session:
+            expires_at = await session.scalar(
+                select(AuthSession.expires_at).where(
+                    AuthSession.id == principal.session_id,
+                    AuthSession.revoked_at.is_(None),
+                    AuthSession.expires_at > now,
+                )
+            )
+            if expires_at is None:
+                raise AuthenticationError()
+            replaced = (
+                await session.scalars(
+                    update(ApiKey)
+                    .where(
+                        ApiKey.session_id == principal.session_id,
+                        ApiKey.team_id == ctx.team_id,
+                        ApiKey.revoked_at.is_(None),
+                    )
+                    .values(revoked_at=now, revoked_by_user_id=principal.user_id)
+                    .returning(ApiKey.prefix)
+                )
+            ).all()
+            issued = await self._insert(
+                session,
+                ctx,
+                name=SESSION_KEY_NAME,
+                scopes=SESSION_KEY_SCOPES,
+                restrictions=None,
+                lifetime=expires_at - now,
+                rotated_from=None,
+                session_id=principal.session_id,
+            )
+            self._audit.add(
+                session,
+                action="api_key.session_issue",
+                actor=principal,
+                team_id=ctx.team_id,
+                target_type="api_key",
+                target_id=issued.key.id,
+                details={
+                    "prefix": issued.key.prefix,
+                    "expires_at": issued.key.expires_at.isoformat(),
+                    "replaced": list(replaced),
                 },
             )
         return issued
@@ -286,6 +348,7 @@ class ApiKeyService:
         restrictions: tuple[str, ...] | None,
         lifetime: timedelta,
         rotated_from: uuid.UUID | None,
+        session_id: uuid.UUID | None = None,
     ) -> IssuedApiKey:
         if not scopes:
             raise InvalidInputError("At least one scope is required.")
@@ -304,6 +367,7 @@ class ApiKeyService:
             created_at=now,
             expires_at=now + lifetime,
             rotated_from_id=rotated_from,
+            session_id=session_id,
         )
         session.add(key)
         await session.flush()

@@ -7,13 +7,16 @@ import { createJSONStorage, persist } from "zustand/middleware"
 
 import type { User } from "@/lib/api/types"
 
-/** A platform API key (urk_) the user created or pasted for the agent chat and tool runs. */
+/** A platform API key (urk_) for the agent chat and tool runs: the login session's own key
+ *  (issued automatically) or one the user pasted. */
 export interface ToolKey {
   key: string
   keyId: string | null
   prefix: string
   name: string
   expiresAt: string | null
+  /** Session keys die with the login (logout revokes them), so they may be kept across tabs. */
+  sessionBound?: boolean
 }
 
 interface AuthState {
@@ -21,7 +24,8 @@ interface AuthState {
   expiresAt: string | null
   user: User | null
   activeTeamId: string | null
-  /** Per team. Kept in sessionStorage only, so it disappears when the tab closes. */
+  /** Per team. Session keys persist with the login (localStorage); pasted keys stay in this
+   *  tab only (sessionStorage). */
   toolKeys: Record<string, ToolKey>
   signIn: (token: string, expiresAt: string, user: User) => void
   signOut: () => void
@@ -61,6 +65,9 @@ export const useAuthStore = create<AuthState>()(
         expiresAt: s.expiresAt,
         user: s.user,
         activeTeamId: s.activeTeamId,
+        toolKeys: Object.fromEntries(
+          Object.entries(s.toolKeys).filter(([, k]) => k.sessionBound)
+        ),
       }),
     }
   )
@@ -68,10 +75,10 @@ export const useAuthStore = create<AuthState>()(
 
 const TOOL_KEY_STORAGE = "urumi.toolKeys"
 
-// Tool keys live in sessionStorage, separate from the persisted session above.
+// A tab's own choice (e.g. a pasted key) lives in sessionStorage and wins over the session key.
 try {
   const raw = sessionStorage.getItem(TOOL_KEY_STORAGE)
-  if (raw) useAuthStore.setState({ toolKeys: JSON.parse(raw) })
+  if (raw) useAuthStore.setState((s) => ({ toolKeys: { ...s.toolKeys, ...JSON.parse(raw) } }))
 } catch {
   sessionStorage.removeItem(TOOL_KEY_STORAGE)
 }
