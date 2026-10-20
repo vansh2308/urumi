@@ -29,6 +29,7 @@ from gateway.services.invitations import InvitationService
 from gateway.services.rate_limit import RateLimiter
 from gateway.services.teams import TeamService
 from gateway.services.tools import ToolService
+from gateway.stores.service import StoreService
 from gateway.upstream.client import McpUpstreamClient, build_upstream_http_client
 from gateway.upstream.credentials import CredentialCipher
 
@@ -53,6 +54,7 @@ class Container:
     upstream: McpUpstreamClient
     connectors: ConnectorService
     hosted: HostedServerService
+    stores: StoreService
     oauth: OAuthService | None
     tools: ToolService
     activity: ActivityService
@@ -143,6 +145,7 @@ def build_container(settings: Settings) -> Container:
             settings=settings.hosted,
             upstream_settings=settings.upstream,
         ),
+        stores=StoreService(db, audit=audit, cipher=cipher, settings=settings.stores),
         oauth=oauth,
         tools=ToolService(
             db,

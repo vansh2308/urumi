@@ -33,7 +33,7 @@ from gateway.api.schemas import (
     ToolSetOut,
     UpdateConnectorRequest,
 )
-from gateway.db.models import Connector
+from gateway.db.models import Connector, ConnectorKind
 from gateway.errors import PermissionDeniedError
 from gateway.services.connectors import (
     ConnectorChange,
@@ -56,9 +56,10 @@ def connector_out(connector: Connector, principal: Principal) -> ConnectorOut:
         display_name=connector.display_name,
         description=connector.description,
         enabled=connector.enabled,
+        kind=connector.kind,
+        managed=connector.kind == ConnectorKind.STORE.value,
     )
     if principal.is_platform_admin:
-        out.kind = connector.kind
         out.url = connector.url
         if connector.credential_header:
             out.credential = CredentialOut(header_name=connector.credential_header)
@@ -220,6 +221,7 @@ async def list_team_connectors(ctx: TeamDep, container: ContainerDep) -> list[Te
             slug=v.connector.slug,
             display_name=v.connector.display_name,
             description=v.connector.description,
+            kind=v.connector.kind,
             team_policy=_toolset(v.policy) if ctx.is_admin else None,
             your_access=_toolset(v.effective),
         )

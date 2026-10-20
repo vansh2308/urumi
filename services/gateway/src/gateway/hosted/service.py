@@ -23,7 +23,7 @@ from sqlalchemy.exc import IntegrityError
 
 from gateway.config import HostedSettings, UpstreamSettings
 from gateway.db.engine import Database
-from gateway.db.models import Connector, ConnectorKind, HostedServer
+from gateway.db.models import Connector, ConnectorKind, HostedServer, Store
 from gateway.errors import ConflictError, InvalidInputError, NotFoundError, PermissionDeniedError
 from gateway.hosted import manifests
 from gateway.hosted.kube import ClusterError, KubeApi
@@ -351,6 +351,8 @@ class HostedServerService:
                 raise ConflictError(
                     f"The platform already runs {self._settings.max_servers} hosted servers."
                 )
+            if await session.scalar(select(Store.id).where(Store.slug == connector.slug)):
+                raise ConflictError("This slug belongs to a provisioned store.")
             session.add(connector)
             try:
                 await session.flush()

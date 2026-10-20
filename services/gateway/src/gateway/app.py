@@ -32,6 +32,7 @@ from gateway.api.routes import (
     health,
     hosted,
     oauth,
+    stores,
     teams,
 )
 from gateway.config import Settings
@@ -90,6 +91,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(connectors.registry)
     app.include_router(connectors.team)
     app.include_router(hosted.router)
+    app.include_router(stores.settings_router)
+    app.include_router(stores.router)
     app.include_router(activity.router)
     if container.oauth is not None:
         app.router.routes.extend(

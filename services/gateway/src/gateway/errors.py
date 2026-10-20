@@ -60,6 +60,10 @@ class ConflictError(AppError):
     status_code = 409
 
 
+class QuotaExceededError(ConflictError):
+    code = "quota_exceeded"
+
+
 class RateLimitedError(AppError):
     code = "rate_limited"
     status_code = 429

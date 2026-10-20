@@ -299,6 +299,41 @@ class HostedSettings(BaseSettings):
         return key, value
 
 
+class StoreSettings(BaseSettings):
+    """Provisioned WooCommerce stores: limits the gateway enforces when a user asks for one,
+    and the naming both the gateway and the provisioner derive from a store's slug."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="STORES_", env_file=_ENV_FILE, extra="ignore", frozen=True
+    )
+
+    enabled: bool = Field(
+        default=False,
+        description="Offer the stores API. Needs the provisioner running in the cluster.",
+    )
+    max_per_user: int = Field(default=2, ge=0, description="Live stores one user may create.")
+    max_total: int = Field(default=5, ge=0, description="Live stores on the whole platform.")
+    provision_timeout_seconds: int = Field(
+        default=900, ge=60, description="Deadline for a store to become ready (per attempt)."
+    )
+    base_domain: str = Field(
+        default="localtest.me",
+        pattern=r"^[a-z0-9]([-a-z0-9.]{0,200}[a-z0-9])?$",
+        description="Stores get <slug>.<base_domain>. *.localtest.me resolves to 127.0.0.1.",
+    )
+    tls: bool = Field(default=False, description="Storefront URLs use https (cert-manager).")
+    namespace_prefix: str = Field(default="store-", pattern=r"^[a-z][a-z0-9-]{0,20}-$")
+
+    def host_of(self, slug: str) -> str:
+        return f"{slug}.{self.base_domain}"
+
+    def url_of(self, slug: str) -> str:
+        return f"{'https' if self.tls else 'http'}://{self.host_of(slug)}"
+
+    def namespace_of(self, slug: str) -> str:
+        return f"{self.namespace_prefix}{slug}"
+
+
 class OAuthSettings(BaseSettings):
     """OAuth 2.1 for MCP clients (MCP authorization spec): the gateway is the authorization
     server for its own MCP endpoint. Access tokens are short-lived platform API keys."""
@@ -362,6 +397,7 @@ class Settings:
         retention: RetentionSettings | None = None,
         hosted: HostedSettings | None = None,
         oauth: OAuthSettings | None = None,
+        stores: StoreSettings | None = None,
     ) -> None:
         self.app = app or AppSettings()
         self.server = server or ServerSettings()
@@ -373,6 +409,7 @@ class Settings:
         self.retention = retention or RetentionSettings()
         self.hosted = hosted or HostedSettings()
         self.oauth = oauth or OAuthSettings()
+        self.stores = stores or StoreSettings()
         if self.oauth.enabled and not (self.oauth.issuer_url and self.oauth.consent_url):
             raise ValueError("OAUTH_ENABLED needs OAUTH_ISSUER_URL and OAUTH_CONSENT_URL")
         if self.api_keys.default_ttl_days > self.api_keys.max_ttl_days:

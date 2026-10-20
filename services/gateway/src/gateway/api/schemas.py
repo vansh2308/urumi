@@ -317,7 +317,14 @@ class ConnectorOut(BaseModel):
     display_name: str
     description: str
     enabled: bool
-    kind: str | None = Field(default=None, description="'remote' (by URL) or 'hosted'.")
+    kind: str | None = Field(
+        default=None,
+        description="'remote' (by URL), 'hosted' (deployed from an image) or 'store' (the MCP "
+        "server of a provisioned store: managed, only enable/disable applies).",
+    )
+    managed: bool = Field(
+        default=False, description="Managed by a provisioned store: no edit or delete here."
+    )
     url: str | None = None
     credential: CredentialOut | None = Field(
         default=None, description="The credential's header name only; the value is never shown."
@@ -470,6 +477,7 @@ class TeamConnectorOut(BaseModel):
     slug: str
     display_name: str
     description: str
+    kind: str = Field(default="remote", description="'remote', 'hosted' or 'store'.")
     team_policy: ToolSetOut | None = Field(
         default=None, description="Tools enabled for the team (admins only)."
     )
@@ -552,3 +560,69 @@ class UsageSummaryOut(BaseModel):
     since: datetime | None
     until: datetime | None
     rows: list[SummaryRowOut]
+
+
+# --- stores ---------------------------------------------------------------------------------------
+
+
+class CreateStoreRequest(RequestModel):
+    name: Annotated[str, Field(min_length=1, max_length=60)] = Field(
+        description="Display name, e.g. 'Acme'. The address (slug) is derived from it."
+    )
+
+
+class StoreOut(BaseModel):
+    """A provisioned store. ``status``: requested | provisioning | ready | failed | deleting;
+    ``step`` is the last provisioning step that finished."""
+
+    id: uuid.UUID
+    team_id: uuid.UUID
+    name: str
+    slug: str
+    status: str
+    phase: str = Field(description="Provisioning | Ready | Failed | Deleting, for display.")
+    step: str | None
+    status_reason: str | None
+    url: str
+    admin_url: str
+    namespace: str
+    connector_id: uuid.UUID | None
+    connector_slug: str | None = Field(
+        default=None, description="Set once ready: the tools are named <slug>__<tool>."
+    )
+    attempts: int
+    created_by_user_id: uuid.UUID | None
+    created_by_name: str | None
+    created_by_email: str | None
+    created_at: datetime
+    ready_at: datetime | None
+    deadline_at: datetime
+
+
+class StoreCreatedOut(StoreOut):
+    admin_username: str = "admin"
+    admin_password: str | None = Field(
+        default=None,
+        description="The wp-admin password, returned only by the request that created the "
+        "store. It is not stored by the gateway and cannot be shown again.",
+    )
+    created: bool = Field(description="False when an existing store was returned (retry).")
+
+
+class StoreEventOut(BaseModel):
+    at: datetime
+    action: str
+    outcome: str
+    details: dict[str, Any]
+
+
+class StoreDetailOut(StoreOut):
+    events: list[StoreEventOut]
+
+
+class StoreSettingsOut(BaseModel):
+    enabled: bool
+    max_per_user: int
+    max_total: int
+    provision_timeout_seconds: int
+    base_domain: str

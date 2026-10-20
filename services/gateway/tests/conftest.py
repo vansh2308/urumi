@@ -44,6 +44,7 @@ from gateway.config import (
     RetentionSettings,
     ServerSettings,
     Settings,
+    StoreSettings,
     UpstreamSettings,
 )
 
@@ -209,6 +210,7 @@ def make_settings(dsn: str) -> Settings:
             allow_http_issuer=True,
             requests_per_minute=1000,
         ),
+        stores=StoreSettings(_env_file=None, enabled=True, max_per_user=2, max_total=10_000),
     )
 
 
