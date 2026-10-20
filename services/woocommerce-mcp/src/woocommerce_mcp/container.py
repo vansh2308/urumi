@@ -95,6 +95,7 @@ def build_container(settings: Settings) -> Container:
         http_client,
         api_base_url=wc.api_base_url,
         authenticator=build_authenticator(wc),
+        connect_url=wc.connect_url,
         retry_policy=RetryPolicy(
             max_attempts=wc.max_attempts,
             backoff_base_seconds=wc.retry_backoff_base_seconds,

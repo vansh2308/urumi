@@ -72,11 +72,16 @@ READ_ONLY = ToolAnnotations(readOnlyHint=True, openWorldHint=True)
 
 
 def build_mcp_server(
-    settings: ServerSettings, *, products: ProductService, orders: OrderService
+    settings: ServerSettings,
+    *,
+    products: ProductService,
+    orders: OrderService,
+    store_name: str | None = None,
 ) -> FastMCP[Any]:
+    label = _store_label(store_name)
     mcp: FastMCP[Any] = FastMCP(
-        name="woocommerce",
-        instructions=INSTRUCTIONS,
+        name=f"woocommerce ({store_name})" if store_name else "woocommerce",
+        instructions=_instructions(store_name),
         host=settings.host,
         port=settings.port,
         streamable_http_path=settings.path,
@@ -92,6 +97,7 @@ def build_mcp_server(
     mcp._mcp_server.version = __version__
 
     @mcp.tool(title="List products", annotations=READ_ONLY)
+    @label
     @_tool_boundary
     async def list_products(
         ctx: Context[Any, Any, Any],
@@ -122,6 +128,7 @@ def build_mcp_server(
             readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=True
         ),
     )
+    @label
     @_tool_boundary
     async def create_product(
         ctx: Context[Any, Any, Any],
@@ -159,6 +166,7 @@ def build_mcp_server(
         return await products.create_product(product, idempotency_key=idempotency_key)
 
     @mcp.tool(title="List orders", annotations=READ_ONLY)
+    @label
     @_tool_boundary
     async def list_orders(
         ctx: Context[Any, Any, Any],
@@ -192,6 +200,7 @@ def build_mcp_server(
         return await orders.list_orders(query)
 
     @mcp.tool(title="Get order", annotations=READ_ONLY)
+    @label
     @_tool_boundary
     async def get_order(ctx: Context[Any, Any, Any], order_id: OrderId) -> Order:
         """Get one order with its line items and totals."""
@@ -203,6 +212,7 @@ def build_mcp_server(
             readOnlyHint=False, destructiveHint=True, idempotentHint=True, openWorldHint=True
         ),
     )
+    @label
     @_tool_boundary
     async def update_order_status(
         ctx: Context[Any, Any, Any],
@@ -220,6 +230,27 @@ def build_mcp_server(
         return await orders.update_order_status(order_id, status, idempotency_key=idempotency_key)
 
     return mcp
+
+
+def _instructions(store_name: str | None) -> str:
+    if not store_name:
+        return INSTRUCTIONS
+    return INSTRUCTIONS.replace(
+        "Tools for one WooCommerce store.",
+        f"Tools for the WooCommerce store {store_name!r}; every call acts on that store only.",
+        1,
+    )
+
+
+def _store_label[F: Callable[..., Any]](store_name: str | None) -> Callable[[F], F]:
+    """Prefix a tool's description (its docstring) with the store it acts on."""
+
+    def apply(fn: F) -> F:
+        if store_name and fn.__doc__:
+            fn.__doc__ = f"[Store: {store_name}] {fn.__doc__}"
+        return fn
+
+    return apply
 
 
 def _tool_boundary[**P, R](fn: Callable[P, Awaitable[R]]) -> Callable[P, Awaitable[R]]:

@@ -111,7 +111,9 @@ async def clean_operations(database_url: str) -> AsyncIterator[None]:
 # --- settings -------------------------------------------------------------------------------------
 
 
-def make_settings(database_url: str, **woocommerce: Any) -> Settings:
+def make_settings(
+    database_url: str, *, store_name: str | None = None, **woocommerce: Any
+) -> Settings:
     wc: dict[str, Any] = {
         "base_url": STORE_URL,
         "consumer_key": "ck_test",
@@ -121,7 +123,9 @@ def make_settings(database_url: str, **woocommerce: Any) -> Settings:
         "retry_backoff_max_seconds": 0,
     } | woocommerce
     return Settings(
-        app=AppSettings(_env_file=None, log_level="WARNING", log_format="console"),
+        app=AppSettings(
+            _env_file=None, log_level="WARNING", log_format="console", store_name=store_name
+        ),
         server=ServerSettings(_env_file=None),
         woocommerce=WooCommerceSettings(_env_file=None, **wc),
         database=DatabaseSettings(_env_file=None, url=database_url, pool_size=2),

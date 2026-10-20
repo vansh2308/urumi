@@ -27,10 +27,11 @@ async def running(
     database_url: str,
     store_http: Callable[[], httpx.AsyncClient],
     monkeypatch: pytest.MonkeyPatch,
+    store_name: str | None = None,
     **woocommerce: Any,
 ) -> AsyncIterator[tuple[Starlette, httpx.AsyncClient]]:
     monkeypatch.setattr(container_module, "build_http_client", lambda _settings: store_http())
-    app = create_app(make_settings(database_url, **woocommerce))
+    app = create_app(make_settings(database_url, store_name=store_name, **woocommerce))
     async with (
         app.router.lifespan_context(app),
         httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=BASE_URL) as client,
@@ -106,6 +107,26 @@ async def test_lists_the_five_tools_with_safety_annotations(app_client: AppClien
     assert tools["list_products"].annotations.readOnlyHint is True
     assert tools["update_order_status"].annotations.destructiveHint is True
     assert "idempotency_key" in tools["create_product"].inputSchema["properties"]
+
+
+async def test_store_name_labels_the_server_and_every_tool(
+    database_url: str,
+    store_http: Callable[[], httpx.AsyncClient],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with (
+        running(database_url, store_http, monkeypatch, store_name="Acme") as (_, http),
+        streamable_http_client(f"{BASE_URL}/mcp", http_client=http) as (read, write, _),
+        ClientSession(read, write) as session,
+    ):
+        init = await session.initialize()
+        tools = (await session.list_tools()).tools
+
+    assert init.serverInfo.name == "woocommerce (Acme)"
+    assert init.instructions is not None
+    assert "'Acme'" in init.instructions
+    assert tools
+    assert all((t.description or "").startswith("[Store: Acme] ") for t in tools)
 
 
 async def test_list_products_returns_structured_content(

@@ -45,6 +45,14 @@ class WooCommerceSettings(BaseSettings):
             "(e.g. http://wordpress.local). OAuth1 signatures are computed against it."
         )
     )
+    connect_url: str | None = Field(
+        default=None,
+        description=(
+            "Where to open the TCP connection, if not WC_BASE_URL (e.g. the in-cluster Service "
+            "http://store-wordpress.store-acme.svc.cluster.local). Requests are still signed "
+            "for, and carry the Host header of, WC_BASE_URL."
+        ),
+    )
     consumer_key: SecretStr
     consumer_secret: SecretStr
     api_path: str = "/wp-json/wc/v3"
@@ -84,6 +92,18 @@ class WooCommerceSettings(BaseSettings):
             raise ValueError("WC_BASE_URL must not contain credentials, a query or a fragment")
         return value.rstrip("/")
 
+    @field_validator("connect_url")
+    @classmethod
+    def _normalise_connect_url(cls, value: str | None) -> str | None:
+        if value is None or not value.strip():
+            return None
+        parts = urlsplit(value)
+        if parts.scheme not in {"http", "https"} or not parts.hostname:
+            raise ValueError("WC_CONNECT_URL must be an absolute http(s) URL")
+        if parts.path.strip("/") or parts.query or parts.fragment or parts.username:
+            raise ValueError("WC_CONNECT_URL must be an origin only (scheme, host, port)")
+        return f"{parts.scheme}://{parts.netloc}"
+
     @field_validator("api_path")
     @classmethod
     def _normalise_api_path(cls, value: str) -> str:
@@ -107,6 +127,14 @@ class WooCommerceSettings(BaseSettings):
     @property
     def api_base_url(self) -> str:
         return f"{self.base_url}{self.api_path}"
+
+    @property
+    def connects_in_cluster(self) -> bool:
+        """True when the connection goes to a Kubernetes Service, never over a public network."""
+        if self.connect_url is None:
+            return False
+        host = urlsplit(self.connect_url).hostname or ""
+        return host.endswith((".svc", ".svc.cluster.local"))
 
 
 class DatabaseSettings(BaseSettings):
@@ -205,6 +233,19 @@ class AppSettings(BaseSettings):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     log_format: Literal["json", "console"] = "json"
     service_name: str = "woocommerce-mcp"
+    store_name: str | None = Field(
+        default=None,
+        max_length=60,
+        description="Display name of the store (STORE_NAME). Shown in the MCP server name, "
+        "its instructions and every tool description, so an agent with several stores can "
+        "tell them apart.",
+    )
+
+    @field_validator("store_name")
+    @classmethod
+    def _strip_store_name(cls, value: str | None) -> str | None:
+        value = " ".join(value.split()) if value else None
+        return value or None
 
 
 class Settings:
@@ -227,5 +268,10 @@ class Settings:
         if (
             self.app.app_env is Environment.PRODUCTION
             and self.woocommerce.auth_method is WooCommerceAuthMethod.OAUTH1
+            and not self.woocommerce.connects_in_cluster
         ):
-            raise ValueError("Production requires an HTTPS WooCommerce store URL")
+            # Plain HTTP is acceptable only when the connection never leaves the cluster.
+            raise ValueError(
+                "Production requires an HTTPS WooCommerce store URL, or WC_CONNECT_URL "
+                "pointing at an in-cluster Service"
+            )

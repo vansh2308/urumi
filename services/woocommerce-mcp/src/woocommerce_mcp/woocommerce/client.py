@@ -24,6 +24,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from pydantic import BaseModel, ValidationError
@@ -95,11 +96,21 @@ class WooCommerceClient:
         api_base_url: str,
         authenticator: RequestAuthenticator,
         retry_policy: RetryPolicy,
+        connect_url: str | None = None,
     ) -> None:
         self._http = http
         self._api_base_url = api_base_url.rstrip("/")
         self._auth = authenticator
         self._retry = retry_policy
+        # With a connect URL the request goes to that origin, but is signed for (and carries
+        # the Host header of) the store's canonical URL, which is what WordPress checks.
+        canonical = urlsplit(self._api_base_url)
+        self._host_header: str | None = None
+        self._send_base_url = self._api_base_url
+        if connect_url is not None:
+            target = urlsplit(connect_url)
+            self._host_header = canonical.netloc
+            self._send_base_url = urlunsplit((target.scheme, target.netloc, canonical.path, "", ""))
 
     # ------------------------------------------------------------------ products
 
@@ -170,10 +181,13 @@ class WooCommerceClient:
     ) -> _Response:
         attempts = max_attempts or self._retry.max_attempts
         url = f"{self._api_base_url}{path}"
+        send_url = f"{self._send_base_url}{path}"
         for attempt in range(1, attempts + 1):
             started = time.perf_counter()
             try:
-                return await self._attempt(method, url, params or {}, json, idempotent, not_found)
+                return await self._attempt(
+                    method, url, send_url, params or {}, json, idempotent, not_found
+                )
             except _Retry as retry:
                 elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
                 if attempt >= attempts:
@@ -209,6 +223,7 @@ class WooCommerceClient:
         self,
         method: str,
         url: str,
+        send_url: str,
         params: Mapping[str, str],
         json: Mapping[str, Any] | None,
         idempotent: bool,
@@ -216,10 +231,13 @@ class WooCommerceClient:
     ) -> _Response:
         signed = self._auth.authenticate(method, url, params)
         query = encode_query(signed.query)
+        headers = {"Accept": "application/json", **signed.headers}
+        if self._host_header is not None:
+            headers["Host"] = self._host_header
         request = self._http.build_request(
             method,
-            f"{url}?{query}" if query else url,
-            headers={"Accept": "application/json", **signed.headers},
+            f"{send_url}?{query}" if query else send_url,
+            headers=headers,
             json=json,
         )
         try:

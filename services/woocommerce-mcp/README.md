@@ -75,6 +75,16 @@ WooCommerce picks the scheme from the connection, so this server derives it from
 `WC_BASE_URL` must match the WordPress *home* URL exactly (scheme, host and port), because the
 store recomputes the OAuth signature over its own URL. Redirects are never followed.
 
+`WC_CONNECT_URL` (optional, origin only) separates *where* the connection goes from *what* is
+signed: requests are sent to that origin but signed for, and carry the `Host` header of,
+`WC_BASE_URL`. Provisioned stores use it to reach WordPress through its in-cluster Service while
+WordPress sees its public host (`acme.localtest.me`). With `APP_ENV=production`, plain HTTP is
+accepted only when `WC_CONNECT_URL` is a `*.svc` / `*.svc.cluster.local` Service.
+
+`STORE_NAME` (optional) names the store in the MCP server name (`woocommerce (Acme)`), its
+instructions and every tool description (`[Store: Acme] List orders ...`), so an agent connected
+to several stores can tell their tools apart.
+
 ### Retries, timeouts and idempotency
 
 | Failure | GET / status update (idempotent) | create (non-idempotent) |

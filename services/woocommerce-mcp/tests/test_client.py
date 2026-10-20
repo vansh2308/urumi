@@ -156,3 +156,40 @@ def test_retry_after_is_honoured_but_capped() -> None:
     assert policy.delay(1, retry_after=2.0) == 2.0
     assert policy.delay(1, retry_after=60.0) == 4.0
     assert 0 <= policy.delay(5) <= 4.0
+
+
+async def test_connect_url_routes_the_connection_but_signs_the_canonical_url() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=[], headers={"X-WP-Total": "0"})
+
+    secret = "cs_test"
+    client = WooCommerceClient(
+        httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        api_base_url="http://acme.localtest.me/wp-json/wc/v3",
+        authenticator=OAuth1Authenticator(SecretStr("ck_test"), SecretStr(secret)),
+        retry_policy=RetryPolicy(max_attempts=1),
+        connect_url="http://store-wordpress.store-acme.svc.cluster.local:80",
+    )
+
+    await client.list_products(ProductQuery())
+
+    sent = seen[0]
+    assert sent.url.host == "store-wordpress.store-acme.svc.cluster.local"
+    assert sent.url.path == "/wp-json/wc/v3/products"
+    assert sent.headers["Host"] == "acme.localtest.me"
+    params = dict(sent.url.params)
+    expected = OAuth1Authenticator(SecretStr("ck_test"), SecretStr(secret)).signature(
+        "GET", "http://acme.localtest.me/wp-json/wc/v3/products", params
+    )
+    assert params["oauth_signature"] == expected
+
+
+async def test_without_connect_url_the_host_header_is_the_store_host() -> None:
+    store = FakeStore()
+
+    await _client(store=store).list_products(ProductQuery())
+
+    assert store.requests[0].headers["Host"] == "store.test"

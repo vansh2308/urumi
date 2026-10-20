@@ -38,7 +38,12 @@ def create_app(settings: Settings | None = None) -> Starlette:
         service_name=settings.app.service_name,
     )
     container = build_container(settings)
-    mcp = build_mcp_server(settings.server, products=container.products, orders=container.orders)
+    mcp = build_mcp_server(
+        settings.server,
+        products=container.products,
+        orders=container.orders,
+        store_name=settings.app.store_name,
+    )
     mcp_app = mcp.streamable_http_app()
 
     @contextlib.asynccontextmanager
@@ -49,6 +54,8 @@ def create_app(settings: Settings | None = None) -> Starlette:
                 "version": __version__,
                 "env": settings.app.app_env.value,
                 "woocommerce_auth": settings.woocommerce.auth_method.value,
+                "store_name": settings.app.store_name,
+                "woocommerce_connect_url": settings.woocommerce.connect_url,
                 "stateless_http": settings.server.stateless_http,
             },
         )
