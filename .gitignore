@@ -347,6 +347,10 @@ deploy/helm/woocommerce/values-local.secret.yaml
 # Helm: vendored copies of local dependency charts (rebuilt by `helm dependency build`)
 deploy/helm/urumi/charts/
 deploy/helm/urumi/Chart.lock
+# The store chart: the pinned Bitnami WordPress chart is vendored (committed); urumi-service is
+# packaged next to it by deploy/scripts/package-store-chart.sh.
+!deploy/helm/urumi-store/charts/wordpress-*.tgz
+deploy/helm/urumi-store/Chart.lock
 
 # Production secrets and values copies
 deploy/helm/woocommerce/*.secret.yaml

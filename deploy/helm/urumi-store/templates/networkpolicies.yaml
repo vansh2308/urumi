@@ -1,0 +1,152 @@
+{{- if .Values.networkPolicies.enabled }}
+{{- /*
+Isolation of one store (docs/stores.md): deny everything, then allow only
+  WordPress  <- ingress controller, store-mcp, setup Job      -> MariaDB, DNS
+  MariaDB    <- WordPress, setup Job                          -> nothing
+  store-mcp  <- gateway pods in the platform namespace        -> WordPress, DNS, public 5432
+  setup Job  <- nothing                                       -> WordPress, MariaDB, DNS
+Pod selectors without a namespaceSelector match this namespace only, so no rule reaches
+another store.
+*/}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: store-default-deny
+  labels:
+    {{- include "urumi-store.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: store-wordpress
+  labels:
+    {{- include "urumi-store.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/name: wordpress
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.networkPolicies.ingressController.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.networkPolicies.ingressController.podLabels | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: store-mcp
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: store-setup
+      ports:
+        - { port: 8080, protocol: TCP }
+        - { port: 8443, protocol: TCP }
+  egress:
+    {{- include "urumi-store.dnsEgress" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: mariadb
+      ports:
+        - { port: 3306, protocol: TCP }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: store-mariadb
+  labels:
+    {{- include "urumi-store.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/name: mariadb
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: wordpress
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: store-setup
+      ports:
+        - { port: 3306, protocol: TCP }
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: store-mcp
+  labels:
+    {{- include "urumi-store.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: store-mcp
+  policyTypes: [Ingress, Egress]
+  ingress:
+    # The MCP server does no client authentication of its own: only the gateway may call it.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.platform.namespace }}
+          podSelector:
+            matchLabels:
+              {{- toYaml .Values.platform.gatewayPodLabels | nindent 14 }}
+      ports:
+        - { port: 8000, protocol: TCP }
+  egress:
+    {{- include "urumi-store.dnsEgress" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: wordpress
+      ports:
+        - { port: 8080, protocol: TCP }
+    # The managed PostgreSQL holding this store's operations schema (public addresses only).
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16]
+      ports:
+        - { port: 5432, protocol: TCP }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: store-setup
+  labels:
+    {{- include "urumi-store.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: store-setup
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress:
+    {{- include "urumi-store.dnsEgress" . | nindent 4 }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: mariadb
+      ports:
+        - { port: 3306, protocol: TCP }
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: wordpress
+      ports:
+        - { port: 8080, protocol: TCP }
+{{- end }}

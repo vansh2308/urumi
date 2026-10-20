@@ -1,4 +1,4 @@
-{{- if .Values.migration.enabled }}
+{{- if and .Values.migration.enabled (eq (.Values.migration.mode | default "hook") "hook") }}
 # Runs before the new pods on install and upgrade; a failure aborts the release, so old pods
 # keep serving. Migrations must stay backward compatible with the previous release (expand,
 # then contract) because the old version runs until the rollout finishes.

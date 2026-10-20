@@ -1,0 +1,21 @@
+apiVersion: v2
+name: urumi-store
+description: >-
+  One provisioned WooCommerce store in its own namespace: Bitnami WordPress + MariaDB (store
+  image with WooCommerce baked in), the store's own WooCommerce MCP server (urumi-service aliased
+  as store-mcp), NetworkPolicies and an idempotent WP-CLI setup Job. Installed by the
+  provisioner as release `store` in namespace `store-<slug>`; the namespace, its quota and the
+  Secrets are created by the provisioner before the release.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+dependencies:
+  # Vendored in charts/ (pinned, no download at install time). Same version as the core store.
+  - name: wordpress
+    version: 34.1.3
+    repository: oci://registry-1.docker.io/bitnamicharts
+  # Packaged into charts/ by deploy/scripts/package-store-chart.sh.
+  - name: urumi-service
+    alias: store-mcp
+    version: 0.1.0
+    repository: file://../urumi-service

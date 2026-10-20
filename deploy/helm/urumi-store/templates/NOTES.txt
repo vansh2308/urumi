@@ -1,0 +1,4 @@
+Store {{ .Values.store.name | default .Release.Namespace }} ({{ .Release.Namespace }})
+  Storefront: {{ .Values.wordpress.wordpressScheme }}://{{ .Values.wordpress.wordpressHost }}/
+  wp-admin:   {{ .Values.wordpress.wordpressScheme }}://{{ .Values.wordpress.wordpressHost }}/wp-admin/
+  MCP server: http://store-mcp.{{ .Release.Namespace }}.svc.cluster.local:8000/mcp (gateway only)

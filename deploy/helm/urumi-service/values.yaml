@@ -121,6 +121,9 @@ networkPolicy:
 # ConfigMap does not exist yet when it runs).
 migration:
   enabled: false
+  # hook: a pre-install/pre-upgrade Job (Helm waits for it). initContainer: runs in every pod
+  # before the service starts (for releases whose Helm calls must not block, e.g. stores).
+  mode: hook
   command: ["alembic", "upgrade", "head"]
   env: {}
   secretNames: [DB_URL]

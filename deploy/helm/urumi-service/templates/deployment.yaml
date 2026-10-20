@@ -43,6 +43,37 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- include "urumi-service.hostAliases" . | nindent 6 }}
+      {{- if and .Values.migration.enabled (eq (.Values.migration.mode | default "hook") "initContainer") }}
+      initContainers:
+        # Migrations before every start instead of a Helm hook: no Helm call waits on them, and
+        # the pod's own NetworkPolicy (by its labels) applies. Alembic is a no-op when current.
+        - name: migrate
+          image: {{ include "urumi-service.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            {{- toYaml .Values.migration.command | nindent 12 }}
+          env:
+            {{- range $key, $value := .Values.migration.env }}
+            - name: {{ $key }}
+              value: {{ $value | toString | quote }}
+            {{- end }}
+            {{- range .Values.secretEnv }}
+            {{- if has .name $.Values.migration.secretNames }}
+            - name: {{ .name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .secretName }}
+                  key: {{ default .name .key }}
+            {{- end }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.migration.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: migrate-tmp
+              mountPath: /tmp
+      {{- end }}
       containers:
         - name: {{ include "urumi-service.name" . }}
           image: {{ include "urumi-service.image" . }}
@@ -99,6 +130,11 @@ spec:
             {{- toYaml . | nindent 12 }}
             {{- end }}
       volumes:
+        {{- if and .Values.migration.enabled (eq (.Values.migration.mode | default "hook") "initContainer") }}
+        - name: migrate-tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        {{- end }}
         {{- range $i, $dir := .Values.writableDirs }}
         - name: scratch-{{ $i }}
           emptyDir:

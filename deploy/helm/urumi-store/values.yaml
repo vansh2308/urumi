@@ -1,0 +1,155 @@
+# Defaults for one provisioned store. The provisioner layers a generated values file on top with
+# the store's identity (store.*), host names, image tags and the setup run id; secrets are never
+# in values: they live in the two Secrets below, created by the provisioner before the release.
+#
+#   store-credentials  wordpress-password, mariadb-root-password, mariadb-password,
+#                      mariadb-replication-password
+#   store-mcp          WC_CONSUMER_KEY, WC_CONSUMER_SECRET, DB_URL
+#
+# Names are fixed by the release name `store`: Services store-wordpress, store-mariadb and
+# store-mcp in namespace store-<slug>.
+
+store:
+  name: ""            # display name, e.g. Acme
+  slug: ""            # e.g. acme (namespace store-acme)
+  host: ""            # public host, e.g. acme.localtest.me
+  adminUser: admin
+  country: "US:CA"
+  currency: USD
+
+secrets:
+  credentials: store-credentials
+  mcp: store-mcp
+
+# Where the gateway runs: the only pods allowed to call this store's MCP server.
+platform:
+  namespace: urumi
+  gatewayPodLabels:
+    app.kubernetes.io/name: gateway
+
+# The WP-CLI setup Job (templates/setup-job.yaml). Rendered only when runId is set; the
+# provisioner sets it to the attempt number after WordPress is ready, so every attempt gets a
+# fresh Job (Job specs are immutable) and the previous one is removed by Helm.
+setup:
+  runId: ""
+  seedDemo: true
+  backoffLimit: 2
+  activeDeadlineSeconds: 900
+  waitSeconds: 600
+  resources:
+    requests: { cpu: 100m, memory: 192Mi }
+    limits: { memory: 512Mi }
+
+networkPolicies:
+  enabled: true
+  # The ingress controller's pods (Traefik in k3s).
+  ingressController:
+    namespace: kube-system
+    podLabels:
+      app.kubernetes.io/name: traefik
+
+# --- Bitnami WordPress + MariaDB ------------------------------------------------------------------
+wordpress:
+  global:
+    security:
+      # Our image is the Bitnami image plus WooCommerce; Bitnami charts refuse non-Bitnami
+      # repositories unless this is set.
+      allowInsecureImages: true
+  image:
+    registry: docker.io
+    repository: urumi/store-wordpress
+    tag: dev
+    pullPolicy: IfNotPresent
+  wordpressUsername: admin
+  wordpressEmail: admin@example.com
+  wordpressBlogName: Urumi Store
+  wordpressScheme: http
+  wordpressHost: ""
+  existingSecret: store-credentials
+  allowEmptyPassword: false
+  # WooCommerce is baked into the image and activated by the setup Job (no downloads).
+  wordpressPlugins: none
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hostname: ""
+    pathType: Prefix
+  persistence:
+    enabled: true
+    size: 2Gi
+    # No helm.sh/resource-policy: keep here (unlike the core store): teardown removes volumes.
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 768Mi }
+  # Our own policies (templates/networkpolicies.yaml) replace the chart's allow-all defaults.
+  networkPolicy:
+    enabled: false
+  mariadb:
+    enabled: true
+    image:
+      # The image the core store runs, pinned by digest.
+      registry: registry-1.docker.io
+      repository: bitnami/mariadb
+      digest: sha256:354e5aec20455bce931a05fa791c51e4a45879015bee09591295c76fe88c037e
+    auth:
+      existingSecret: store-credentials
+      database: bitnami_wordpress
+      username: bn_wordpress
+    primary:
+      persistence:
+        enabled: true
+        size: 2Gi
+      resources:
+        requests: { cpu: 100m, memory: 256Mi }
+        limits: { memory: 512Mi }
+    networkPolicy:
+      enabled: false
+
+# --- The store's own WooCommerce MCP server ------------------------------------------------------
+store-mcp:
+  nameOverride: store-mcp
+  fullnameOverride: store-mcp
+  component: mcp-server
+  image:
+    repository: urumi/woocommerce-mcp
+  containerPort: 8000
+  service:
+    port: 8000
+  terminationGracePeriodSeconds: 35
+  env:
+    APP_ENV: local
+    LOG_FORMAT: json
+    LOG_LEVEL: INFO
+    MCP_HOST: 0.0.0.0
+    MCP_PORT: "8000"
+    MCP_SHUTDOWN_GRACE_SECONDS: "25"
+    MCP_READINESS_CHECKS_WOOCOMMERCE: "false"
+    # The provisioner sets STORE_NAME, WC_BASE_URL (the public URL, signed) and WC_CONNECT_URL
+    # (the in-cluster WordPress Service, connected to), and MCP_ALLOWED_HOSTS for the namespace.
+    WC_ALLOW_INSECURE_HTTP: "true"
+    WC_IP_FAMILY: auto
+    MCP_ALLOWED_HOSTS: store-mcp:*,localhost:*,127.0.0.1:*
+  secretEnv:
+    - { name: WC_CONSUMER_KEY, secretName: store-mcp }
+    - { name: WC_CONSUMER_SECRET, secretName: store-mcp }
+    # A Postgres role + schema of this store only (search_path is set on the role).
+    - { name: DB_URL, secretName: store-mcp }
+  probes:
+    liveness: { path: /healthz }
+    readiness: { path: /readyz }
+    startup: { path: /healthz, periodSeconds: 2, failureThreshold: 60 }
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 256Mi }
+  migration:
+    enabled: true
+    # Alembic in an init container, so no Helm call waits on a hook Job.
+    mode: initContainer
+    resources:
+      requests: { cpu: 50m, memory: 96Mi }
+      limits: { memory: 256Mi }
+  # Rendered by templates/networkpolicies.yaml with the platform namespace (see above).
+  networkPolicy:
+    enabled: false
