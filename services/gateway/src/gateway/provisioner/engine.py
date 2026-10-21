@@ -223,6 +223,13 @@ class Provisioner:
                 await self._provision(lease)
         except LeaseLost:
             logger.warning("lease lost; another worker continues", extra={"store_id": store_id})
+        except asyncio.CancelledError:
+            # Shutting down (SIGTERM): hand the store back so the next provisioner resumes it
+            # at once instead of after the lease expires. A half-done Helm call is recovered.
+            with contextlib.suppress(Exception):
+                await asyncio.shield(self._release(lease))
+            logger.info("stopped mid-store; lease released", extra={"store_id": store_id})
+            raise
         except Exception:
             # Unexpected: hand the store back with a pause, so it is retried, not hot-looped.
             logger.exception("store processing failed", extra={"store_id": store_id})

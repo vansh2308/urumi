@@ -436,6 +436,27 @@ async def test_stores_run_in_parallel_with_a_worker_pool(rigs: RigFactory) -> No
             await runner
 
 
+async def test_shutdown_mid_store_releases_the_lease(rigs: RigFactory) -> None:
+    async with rigs() as rig:
+        created = await rig.create()
+        rig.helm.ready_after = 10_000  # stays in wait-ready
+        provisioner = rig.provisioner()
+        store_id = await provisioner.claim()
+        assert store_id is not None
+        task = asyncio.create_task(provisioner.process(store_id))
+        async with asyncio.timeout(5):
+            while (await rig.store(created["id"]))["step"] != "release":
+                await asyncio.sleep(0.01)  # noqa: ASYNC110 - polling the database
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        row = await rig.store(created["id"])
+        assert (row["status"], row["lease_owner"], row["step"]) == ("provisioning", None, "release")
+        # Another provisioner can take it over immediately.
+        assert await rig.provisioner("successor").claim() == store_id
+
+
 async def test_two_workers_never_claim_the_same_store(rigs: RigFactory) -> None:
     async with rigs() as rig:
         await rig.create()
