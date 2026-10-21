@@ -1,0 +1,150 @@
+{{- /*
+Cluster rights of the store provisioner (docs/stores.md), and the guard rail around them.
+
+* ClusterRole urumi-provisioner (cluster-wide): create/delete namespaces, manage the RoleBinding
+  in them, and `bind` exactly one ClusterRole (urumi-store-manager). Nothing else cluster-wide:
+  it cannot read Secrets or Pods anywhere until it has bound that role in a namespace.
+* ClusterRole urumi-store-manager: what Helm creates in a store namespace. Bound per store
+  namespace by the provisioner itself (a RoleBinding made in the `namespace` step), so its
+  rights exist only in namespaces it created.
+* ValidatingAdmissionPolicy: Kubernetes RBAC cannot filter by label, so the policy refuses any
+  namespace or RoleBinding change by the provisioner's ServiceAccount outside namespaces
+  labelled urumi.io/managed-by=provisioner. A bug cannot delete `urumi` or bind itself there.
+*/ -}}
+{{- if and .Values.provisioner.enabled .Values.storeProvisioning.enabled }}
+{{- $sa := .Values.provisioner.fullnameOverride | default "provisioner" }}
+{{- $storeRole := .Values.storeProvisioning.storeClusterRole }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: urumi-provisioner
+  labels:
+    app.kubernetes.io/part-of: urumi
+    app.kubernetes.io/component: provisioner
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [rolebindings]
+    verbs: [get, create, update, patch, delete]
+  # Allows creating RoleBindings to this one ClusterRole without already holding its rights.
+  - apiGroups: [rbac.authorization.k8s.io]
+    resources: [clusterroles]
+    verbs: [bind]
+    resourceNames: [{{ $storeRole }}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: urumi-provisioner
+  labels:
+    app.kubernetes.io/part-of: urumi
+    app.kubernetes.io/component: provisioner
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: urumi-provisioner
+subjects:
+  - kind: ServiceAccount
+    name: {{ $sa }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $storeRole }}
+  labels:
+    app.kubernetes.io/part-of: urumi
+    app.kubernetes.io/component: provisioner
+rules:
+  # Helm's release records are Secrets; the store's own Secrets are created by the provisioner.
+  - apiGroups: [""]
+    resources:
+      - secrets
+      - configmaps
+      - services
+      - serviceaccounts
+      - persistentvolumeclaims
+      - resourcequotas
+      - limitranges
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [pods, events]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [apps]
+    resources: [replicasets]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: [get, list, watch, create, update, patch, delete]
+{{- if .Values.storeProvisioning.admissionPolicy }}
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: urumi-provisioner-managed-namespaces
+  labels:
+    app.kubernetes.io/part-of: urumi
+    app.kubernetes.io/component: provisioner
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [namespaces]
+      - apiGroups: [rbac.authorization.k8s.io]
+        apiVersions: ["*"]
+        operations: [CREATE, UPDATE, DELETE]
+        resources: [rolebindings]
+  matchConditions:
+    - name: is-the-provisioner
+      expression: >-
+        request.userInfo.username == 'system:serviceaccount:{{ .Release.Namespace }}:{{ $sa }}'
+  variables:
+    - name: label
+      expression: "'urumi.io/managed-by'"
+    # The namespace the request is about: the object itself for namespaces (old and new for an
+    # update; old for a delete), the containing namespace for RoleBindings.
+    - name: namespaces
+      expression: >-
+        request.resource.resource == 'namespaces'
+          ? (request.operation == 'CREATE' ? [object]
+             : request.operation == 'DELETE' ? [oldObject] : [object, oldObject])
+          : [namespaceObject]
+  validations:
+    - expression: >-
+        variables.namespaces.all(ns, ns != null && has(ns.metadata.labels)
+          && variables.label in ns.metadata.labels
+          && ns.metadata.labels[variables.label] == 'provisioner')
+      message: >-
+        The store provisioner may only manage namespaces labelled
+        urumi.io/managed-by=provisioner.
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: urumi-provisioner-managed-namespaces
+  labels:
+    app.kubernetes.io/part-of: urumi
+    app.kubernetes.io/component: provisioner
+spec:
+  policyName: urumi-provisioner-managed-namespaces
+  validationActions: [Deny]
+{{- end }}
+{{- end }}

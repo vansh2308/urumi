@@ -17,6 +17,7 @@
 #   store access    HTTPS on the store's real domain, Basic auth   (local: HTTP + OAuth 1.0a)
 #   API docs        off                                            (local: on)
 #   Kubernetes API  the node's IP for the gateway's egress rule    (local: k3d Docker network)
+#   stores          https://<slug>.shop.example.com, wildcard DNS  (local: <slug>.localtest.me)
 
 x-replicated: &replicated
   replicaCount: 2
@@ -78,6 +79,11 @@ gateway:
     # Pin hosted images by digest in production, e.g. ghcr.io/github/github-mcp-server@sha256:…
     HOSTED_ALLOWED_IMAGES: >-
       ghcr.io/github/github-mcp-server:*,ghcr.io/github/github-mcp-server@sha256:*,mcp/duckduckgo:*,mcp/duckduckgo@sha256:*
+    # Keep in step with provisioner.env below.
+    STORES_BASE_DOMAIN: shop.example.com
+    STORES_TLS: "true"
+    STORES_MAX_TOTAL: "10"
+    STORES_PROVISION_TIMEOUT_SECONDS: "600"
   networkPolicy:
     # The Kubernetes API server (hosted MCP servers): on k3s, the node's private IP, port 6443
     # (`kubectl get endpoints kubernetes`). Replace the range with <node-ip>/32.
@@ -97,6 +103,30 @@ gateway:
     tls:
       - secretName: gateway-tls
         hosts: [gateway.example.com]
+
+# Store provisioner: one replica (never replicated). Stores need a wildcard DNS record
+# *.shop.example.com -> the VPS; cert-manager issues one certificate per store host (HTTP-01).
+provisioner:
+  image:
+    repository: ghcr.io/your-org/urumi-gateway
+  env:
+    APP_ENV: production
+    STORES_BASE_DOMAIN: shop.example.com
+    STORES_TLS: "true"
+    STORES_MAX_TOTAL: "10"
+    STORES_PROVISION_TIMEOUT_SECONDS: "600"
+    PROVISIONER_STORE_APP_ENV: production
+    PROVISIONER_TLS_CLUSTER_ISSUER: letsencrypt
+    PROVISIONER_STORAGE_CLASS: local-path
+    PROVISIONER_WORDPRESS_VOLUME: 5Gi
+    PROVISIONER_MARIADB_VOLUME: 5Gi
+    # Set the tags with --set (deploy-vps.sh does): the same git SHA as the other images.
+    PROVISIONER_STORE_IMAGE: ghcr.io/your-org/urumi-store-wordpress:latest
+    PROVISIONER_MCP_IMAGE: ghcr.io/your-org/urumi-woocommerce-mcp:latest
+  networkPolicy:
+    extraEgress:
+      - to: [{ ipBlock: { cidr: 10.0.0.0/8 } }]
+        ports: [{ port: 6443, protocol: TCP }]
 
 agent:
   <<: *replicated

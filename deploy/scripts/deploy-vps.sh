@@ -18,7 +18,7 @@ CHART="${ROOT}/deploy/helm/urumi"
 extra=()
 [[ -n "${EXTRA_VALUES:-}" ]] && extra+=(-f "${EXTRA_VALUES}")
 
-helm dependency build "${CHART}" >/dev/null
+helm dependency update "${CHART}" >/dev/null  # file:// charts only; no download
 helm upgrade --install urumi "${CHART}" -n "${NAMESPACE}" \
   -f "${CHART}/values.yaml" -f "${CHART}/values-production.yaml" ${extra[@]+"${extra[@]}"} \
   --set global.imageTag="${TAG}" \
@@ -26,6 +26,11 @@ helm upgrade --install urumi "${CHART}" -n "${NAMESPACE}" \
   --set gateway.image.repository="${REGISTRY}/urumi-gateway" \
   --set agent.image.repository="${REGISTRY}/urumi-agent" \
   --set frontend.image.repository="${REGISTRY}/urumi-frontend" \
+  --set provisioner.image.repository="${REGISTRY}/urumi-gateway" \
+  --set provisioner.env.PROVISIONER_STORE_IMAGE="${REGISTRY}/urumi-store-wordpress:${TAG}" \
+  --set provisioner.env.PROVISIONER_MCP_IMAGE="${REGISTRY}/urumi-woocommerce-mcp:${TAG}" \
+  --set gateway.env.STORES_BASE_DOMAIN="shop.${DOMAIN}" \
+  --set provisioner.env.STORES_BASE_DOMAIN="shop.${DOMAIN}" \
   --set woocommerce-mcp.env.WC_BASE_URL="https://shop.${DOMAIN}" \
   --set gateway.env.OAUTH_ISSUER_URL="https://gateway.${DOMAIN}" \
   --set gateway.env.OAUTH_CONSENT_URL="https://app.${DOMAIN}/oauth/consent" \

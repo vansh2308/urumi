@@ -12,7 +12,12 @@
 # Secrets (keys):
 #   woocommerce-mcp-secrets  WC_CONSUMER_KEY, WC_CONSUMER_SECRET, DB_URL
 #   gateway-secrets          DB_URL, AUTH_TOKEN_PEPPER, UPSTREAM_CREDENTIAL_KEYS
+#   provisioner-secrets      PROVISIONER_MCP_ADMIN_DSN
 #   agent-secrets            DB_URL, GEMINI_API_KEY
+#
+# PROVISIONER_MCP_ADMIN_DSN is the database where every provisioned store's MCP server gets its
+# own role + schema; it must be allowed to CREATE ROLE (the database owner on Neon). It is read
+# from services/gateway/.env if set there, else the WooCommerce MCP server's DB_URL is used.
 #
 # The gateway pepper must match the one used to create existing sessions and API keys, and the
 # credential key the one that encrypted stored connector credentials, so both are copied from
@@ -65,3 +70,17 @@ apply_secret woocommerce-mcp-secrets "${ROOT}/services/woocommerce-mcp/.env${ENV
 apply_secret gateway-secrets "${ROOT}/services/gateway/.env${ENV_SUFFIX}" \
   DB_URL AUTH_TOKEN_PEPPER UPSTREAM_CREDENTIAL_KEYS
 apply_secret agent-secrets "${ROOT}/services/agent/.env${ENV_SUFFIX}" DB_URL GEMINI_API_KEY
+
+# The provisioner's admin DSN for store MCP databases (see above).
+gateway_env="${ROOT}/services/gateway/.env${ENV_SUFFIX}"
+if grep -qE "^[[:space:]]*PROVISIONER_MCP_ADMIN_DSN=" "${gateway_env}"; then
+  apply_secret provisioner-secrets "${gateway_env}" PROVISIONER_MCP_ADMIN_DSN
+else
+  extract "${ROOT}/services/woocommerce-mcp/.env${ENV_SUFFIX}" DB_URL \
+    | sed 's/^DB_URL=/PROVISIONER_MCP_ADMIN_DSN=/' > "${WORKDIR}/provisioner.env"
+  kubectl -n "${NAMESPACE}" create secret generic provisioner-secrets \
+    --from-env-file="${WORKDIR}/provisioner.env" --dry-run=client -o yaml \
+    | kubectl label --local -f - -o yaml app.kubernetes.io/part-of=urumi \
+    | kubectl apply -f - >/dev/null
+  echo "secret/provisioner-secrets: PROVISIONER_MCP_ADMIN_DSN (from the MCP server's DB_URL)"
+fi

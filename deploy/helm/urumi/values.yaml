@@ -12,6 +12,7 @@
 # band (deploy/scripts/create-local-secrets.sh locally, your secret manager in production):
 #   woocommerce-mcp-secrets: WC_CONSUMER_KEY, WC_CONSUMER_SECRET, DB_URL
 #   gateway-secrets:         DB_URL, AUTH_TOKEN_PEPPER, UPSTREAM_CREDENTIAL_KEYS
+#   provisioner-secrets:     PROVISIONER_MCP_ADMIN_DSN (may CREATE ROLE in the MCP database)
 #   agent-secrets:           DB_URL, GEMINI_API_KEY
 
 global:
@@ -136,6 +137,14 @@ gateway:
     HOSTED_ALLOWED_IMAGES: >-
       ghcr.io/github/github-mcp-server:*,mcp/duckduckgo:*
     HOSTED_MAX_SERVERS: "10"
+    # Provisioned stores (docs/stores.md). The gateway records requests and enforces the caps;
+    # the provisioner below does the work. Keep these STORES_* in step with the provisioner's.
+    STORES_ENABLED: "true"
+    STORES_MAX_PER_USER: "2"
+    STORES_MAX_TOTAL: "5"
+    STORES_PROVISION_TIMEOUT_SECONDS: "900"
+    STORES_BASE_DOMAIN: localtest.me
+    STORES_TLS: "false"
     # OAuth for MCP clients: OAUTH_ISSUER_URL / OAUTH_CONSENT_URL are per environment.
     OAUTH_ENABLED: "true"
     OAUTH_ACCESS_TOKEN_TTL_SECONDS: "3600"
@@ -189,6 +198,94 @@ gateway:
             podSelector:
               matchLabels:
                 app.kubernetes.io/component: hosted-mcp
+      # Each provisioned store's own MCP server (namespaces store-<slug>, labelled by the
+      # provisioner; the label is enforced by the admission policy in templates/provisioner.yaml).
+      - to:
+          - namespaceSelector:
+              matchLabels:
+                urumi.io/managed-by: provisioner
+            podSelector:
+              matchLabels:
+                app.kubernetes.io/name: store-mcp
+        ports:
+          - { port: 8000, protocol: TCP }
+
+# --- Store provisioner ----------------------------------------------------------------------------
+# Same image as the gateway, other command. Turns stores rows into Helm releases of the
+# urumi-store chart (baked into the image) in namespaces store-<slug>; its cluster rights and
+# their guard rail are in templates/provisioner.yaml. No Ingress, no inbound traffic but probes.
+provisioner:
+  enabled: true
+  nameOverride: provisioner
+  fullnameOverride: provisioner
+  component: provisioner
+  image:
+    repository: urumi/gateway
+  command: ["gateway-provisioner"]
+  containerPort: 8110
+  service:
+    port: 8110
+  # One replica: leases make a second one safe, but it would only add Helm processes.
+  replicaCount: 1
+  strategy:
+    type: Recreate
+  # A worker stops between steps; anything left is resumed from the saved step on restart.
+  terminationGracePeriodSeconds: 30
+  preStopSleepSeconds: 0
+  env:
+    LOG_FORMAT: json
+    LOG_LEVEL: INFO
+    # Keep in step with the gateway's STORES_* above.
+    STORES_ENABLED: "true"
+    STORES_MAX_PER_USER: "2"
+    STORES_MAX_TOTAL: "5"
+    STORES_PROVISION_TIMEOUT_SECONDS: "900"
+    STORES_BASE_DOMAIN: localtest.me
+    STORES_TLS: "false"
+    PROVISIONER_WORKERS: "3"
+    PROVISIONER_MAX_ATTEMPTS: "3"
+    PROVISIONER_CHART_PATH: /opt/urumi/charts/urumi-store
+    PROVISIONER_SERVICE_ACCOUNT_NAME: provisioner
+    PROVISIONER_SERVICE_ACCOUNT_NAMESPACE: urumi
+    PROVISIONER_GATEWAY_NAMESPACE: urumi
+    PROVISIONER_STORE_CLUSTER_ROLE: urumi-store-manager
+    # PROVISIONER_STORE_IMAGE / PROVISIONER_MCP_IMAGE are per environment (tags).
+  secretEnv:
+    - { name: DB_URL, secretName: gateway-secrets }
+    # Decrypts the one-time wp-admin password the gateway stored for the provisioner.
+    - { name: UPSTREAM_CREDENTIAL_KEYS, secretName: gateway-secrets, optional: true }
+    - { name: PROVISIONER_MCP_ADMIN_DSN, secretName: provisioner-secrets }
+  probes:
+    liveness: { path: /health/live }
+    readiness: { path: /health/ready }
+    startup: { path: /health/live, periodSeconds: 2, failureThreshold: 30 }
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 384Mi
+  # Helm's cache and the generated values files.
+  writableDirs:
+    - /tmp
+  serviceAccount:
+    automountToken: true
+  networkPolicy:
+    enabled: true
+    ingress: []
+    # The Kubernetes API rule is per environment: see values-<env>.yaml.
+    egress:
+      - *egressDns
+      - *egressPublic  # the gateway database and the MCP database (managed PostgreSQL)
+
+# Cluster rights of the provisioner (templates/provisioner.yaml).
+storeProvisioning:
+  enabled: true
+  # The ClusterRole the provisioner binds in each store namespace (what Helm creates there).
+  storeClusterRole: urumi-store-manager
+  # Kubernetes RBAC cannot filter by label, so an admission policy limits the provisioner to
+  # namespaces labelled urumi.io/managed-by=provisioner (needs Kubernetes 1.30+).
+  admissionPolicy: true
 
 # --- Hosted MCP servers ----------------------------------------------------------------------------
 # Namespace, quota, default-deny NetworkPolicy and the gateway's Role for MCP servers that admins

@@ -41,6 +41,24 @@ gateway:
       - host: gateway.urumi.local
         paths: [{ path: /, pathType: Prefix }]
 
+provisioner:
+  networkPolicy:
+    # The Kubernetes API server (k3d server node on the cluster's Docker network).
+    extraEgress:
+      - to: [{ ipBlock: { cidr: 172.16.0.0/12 } }]
+        ports: [{ port: 6443, protocol: TCP }]
+  env:
+    APP_ENV: local
+    # Stores get http://<slug>.localtest.me (public DNS answers 127.0.0.1 for every name under
+    # localtest.me; the cluster publishes the ingress on host port 80). Images are imported
+    # into k3d; deploy-local.sh sets their tags to the commit.
+    PROVISIONER_STORE_APP_ENV: local
+    PROVISIONER_IMAGE_PULL_POLICY: IfNotPresent
+    PROVISIONER_STORE_IMAGE: docker.io/urumi/store-wordpress:dev
+    PROVISIONER_MCP_IMAGE: urumi/woocommerce-mcp:dev
+    # Laptop budget: about 1 GB of memory per store (docs/stores.md).
+    PROVISIONER_WORKERS: "3"
+
 agent:
   env:
     APP_ENV: local

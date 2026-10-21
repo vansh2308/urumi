@@ -1,8 +1,8 @@
 apiVersion: v2
 name: urumi
 description: >-
-  The Urumi platform's first-party services (WooCommerce MCP server, gateway, agent and
-  dashboard), each an instance of the reusable urumi-service chart. The WooCommerce store itself
+  The Urumi platform's first-party services (WooCommerce MCP server, gateway, store
+  provisioner, agent and dashboard), each an instance of the reusable urumi-service chart. The WooCommerce store itself
   is the separate `store` release (Bitnami WordPress) and is not managed here.
 type: application
 version: 0.1.0
@@ -18,6 +18,11 @@ dependencies:
     version: 0.1.0
     repository: file://../urumi-service
     condition: gateway.enabled
+  - name: urumi-service
+    alias: provisioner
+    version: 0.1.0
+    repository: file://../urumi-service
+    condition: provisioner.enabled
   - name: urumi-service
     alias: agent
     version: 0.1.0
