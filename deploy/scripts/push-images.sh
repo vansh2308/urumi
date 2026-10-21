@@ -29,6 +29,6 @@ for entry in woocommerce-mcp:services/woocommerce-mcp gateway:services/gateway \
     extra=(--build-context "store-chart=${ROOT}/deploy/helm/urumi-store")
   fi
   echo "building and pushing ${image}"
-  docker buildx build --platform "${PLATFORM}" "${extra[@]}" -t "${image}" --push "${ROOT}/${entry#*:}"
+  docker buildx build --platform "${PLATFORM}" ${extra[@]+"${extra[@]}"} -t "${image}" --push "${ROOT}/${entry#*:}"
 done
 echo "pushed tag ${TAG}"

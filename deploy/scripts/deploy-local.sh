@@ -39,7 +39,7 @@ for entry in ${COMPONENTS}; do
     if [[ "${name}" == "gateway" ]]; then
       extra=(--build-context "store-chart=${ROOT}/deploy/helm/urumi-store")
     fi
-    docker build -q "${extra[@]}" -t "urumi/${name}:${TAG}" "${ROOT}/${entry#*:}" >/dev/null
+    docker build -q ${extra[@]+"${extra[@]}"} -t "urumi/${name}:${TAG}" "${ROOT}/${entry#*:}" >/dev/null
   fi
 done
 k3d image import -c "${CLUSTER}" "${images[@]}"
