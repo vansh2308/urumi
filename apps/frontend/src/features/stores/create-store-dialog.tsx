@@ -18,6 +18,7 @@ import { FieldGroup } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
 import { useCreateStore } from "@/hooks/queries/use-stores"
 import { errorMessage } from "@/lib/api/http"
+import { randomId } from "@/lib/utils"
 import type { CreatedStore } from "@/lib/api/types"
 
 const schema = z.object({
@@ -39,7 +40,7 @@ export function CreateStoreDialog({
 }) {
   const create = useCreateStore(teamId)
   // One key per dialog opening: a double submit or a retried request returns the same store.
-  const [idempotencyKey, setIdempotencyKey] = useState(() => crypto.randomUUID())
+  const [idempotencyKey, setIdempotencyKey] = useState(() => randomId())
   const form = useForm<z.infer<typeof schema>>({
     resolver: zodResolver(schema),
     defaultValues: { name: "" },
@@ -47,7 +48,7 @@ export function CreateStoreDialog({
   const close = (next: boolean) => {
     if (!next) {
       form.reset()
-      setIdempotencyKey(crypto.randomUUID())
+      setIdempotencyKey(randomId())
     }
     onOpenChange(next)
   }
