@@ -229,6 +229,7 @@ provisioner:
   replicaCount: 1
   strategy:
     type: Recreate
+    rollingUpdate: null  # drop the chart default (invalid with Recreate)
   # A worker stops between steps; anything left is resumed from the saved step on restart.
   terminationGracePeriodSeconds: 30
   preStopSleepSeconds: 0
