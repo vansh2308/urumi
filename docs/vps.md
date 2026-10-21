@@ -15,10 +15,12 @@ Ubuntu or Debian VPS (2 vCPU / 4 GB RAM is enough), single-node k3s, one domain.
 | Secrets | `create-local-secrets.sh` from `.env` | same script with `ENV_SUFFIX=.production`, or a secret manager |
 | Gateway → Kubernetes API egress | k3d Docker network | the node's IP (`extraEgress`) |
 | API docs | on | off |
+| Provisioned stores | `http://<slug>.localtest.me` | `https://<slug>.shop.<domain>`, wildcard DNS, one certificate per store host ([stores.md](stores.md)) |
 
 ## 1. Server
 
-1. Point DNS A records for `app`, `gateway` and `shop` at the server's public IP.
+1. Point DNS A records for `app`, `gateway` and `shop` at the server's public IP, and a wildcard
+   record `*.shop` for provisioned stores (`acme.shop.<domain>`, …).
 2. Open ports 22, 80 and 443 only (the Kubernetes API, 6443, stays closed to the internet; use
    an SSH tunnel for `kubectl`).
 3. On the server, as root:
@@ -136,3 +138,8 @@ Upgrades and rollbacks are in [deployment.md](deployment.md#5-upgrades-and-rollb
   not against losing the node. A second node only needs `topologySpreadConstraints` and
   storage that is not node-local.
 * **Firewall**: k3s programs iptables; keep the provider firewall limited to 22/80/443.
+* **Provisioned stores**: `deploy-vps.sh` sets `STORES_BASE_DOMAIN=shop.<domain>` and the store
+  image tags; `push-images.sh` also pushes `urumi-store-wordpress`. Each store is about 1 GB at
+  first boot, so `STORES_MAX_TOTAL` (10 in `values-production.yaml`) should match the server's
+  memory; on a 4 GB VPS set it to 2. Let's Encrypt rate limits (50 certificates per registered
+  domain per week) apply to store hosts too.

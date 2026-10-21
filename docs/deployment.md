@@ -15,10 +15,16 @@ anything below.
 | Dashboard (nginx) | `urumi/frontend` | 8080 | `frontend.urumi.svc.cluster.local` | `http://urumi.local` |
 | Store (release `store`) | Bitnami WordPress | 80 | `store-wordpress.urumi.svc.cluster.local` | `http://wordpress.local` |
 | Hosted MCP servers | admin-chosen (e.g. `mcp/duckduckgo`, `ghcr.io/github/github-mcp-server`) | per server | `mcp-<slug>.urumi-mcp.svc.cluster.local` | never: only the gateway may connect |
+| Store provisioner | `urumi/gateway` (`gateway-provisioner`) | 8110 (probes) | `provisioner.urumi.svc.cluster.local` | never |
+| Provisioned stores (release `store` in `store-<slug>`) | `urumi/store-wordpress`, Bitnami MariaDB, `urumi/woocommerce-mcp` | 80 / 8000 | `store-wordpress.store-<slug>`, `store-mcp.store-<slug>` | `http://<slug>.localtest.me` (MCP server never) |
 
 Hosted MCP servers are deployed and removed by the gateway itself, in their own `urumi-mcp`
 namespace; see [hosted-mcp.md](hosted-mcp.md) for the design, the security controls and how the
 GitHub and web search servers are connected.
+
+Stores created from the dashboard are Helm releases of `deploy/helm/urumi-store`, one namespace
+each, installed and removed by the provisioner; see [stores.md](stores.md) for the design, the
+isolation proof, the recovery drill and the demo script.
 
 ```
 browser ──► Traefik ──► frontend (nginx) ──/api/gateway──► gateway ──► woocommerce-mcp ──► store-wordpress
@@ -44,10 +50,10 @@ docker run -d --rm --name urumi-test-postgres -e POSTGRES_PASSWORD=postgres \
   -p 127.0.0.1:55432:5432 --tmpfs /var/lib/postgresql/data postgres:16-alpine
 export TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:55432/postgres
 
-(cd services/woocommerce-mcp && poetry run pytest)   # 33 tests
-(cd services/gateway && poetry run pytest)           # 47 tests
+(cd services/woocommerce-mcp && poetry run pytest)   # 44 tests
+(cd services/gateway && poetry run pytest)           # 107 tests (stores API + provisioner included)
 (cd services/agent && poetry run pytest)             # 14 tests
-(cd apps/frontend && npm test)                       # 10 tests
+(cd apps/frontend && npm test)                       # 13 tests
 
 docker stop urumi-test-postgres
 ```
@@ -231,6 +237,8 @@ responses, so any replica can serve any request without sticky sessions.
 | --- | --- |
 | woocommerce-mcp | gateway pods |
 | hosted MCP servers (`urumi-mcp`) | gateway pods; everything else is denied by a namespace default-deny policy, and their egress is limited to DNS and public addresses |
+| a store's MCP server (`store-<slug>`) | gateway pods; each store namespace is default-deny with allow rules for its own pods only ([stores.md](stores.md#network)) |
+| provisioner | nothing (probes only) |
 | gateway | Traefik, dashboard, agent |
 | agent | Traefik, dashboard |
 | frontend | Traefik |
@@ -246,10 +254,13 @@ on a VPS). Add rules with `networkPolicy.extraEgress` rather than replacing `egr
 Standard (every pod, the store's included, already meets it); `urumi-mcp` enforces it from the
 chart. See [threat-model.md](threat-model.md) for the full threat model.
 
-**ServiceAccounts**: one per service. Only the gateway mounts its token, and its only RBAC is a
+**ServiceAccounts**: one per service. The gateway mounts its token, and its only RBAC is a
 Role in `urumi-mcp` (manage Deployments, Services, Secrets, NetworkPolicies; read Pods) for
-hosted MCP servers. It has no rights in `urumi` or cluster-wide. The other services mount no
-token and have no bindings.
+hosted MCP servers. It has no rights in `urumi` or cluster-wide. The provisioner mounts its
+token: cluster-wide it may manage namespaces and RoleBindings and bind one ClusterRole, and a
+ValidatingAdmissionPolicy limits it to namespaces labelled `urumi.io/managed-by=provisioner`
+([stores.md](stores.md#kubernetes-rights)). The other services mount no token and have no
+bindings.
 
 **Ingress**: Traefik (`className: traefik`). The agent streams answers as server-sent events;
 Traefik flushes them as they arrive and the dashboard's nginx has buffering disabled for
@@ -338,6 +349,11 @@ which removes their Deployment, Service, Secret and NetworkPolicy. It does not t
 MariaDB volumes, or the three Secrets (delete those explicitly if wanted:
 `kubectl -n urumi delete secret woocommerce-mcp-secrets gateway-secrets agent-secrets`).
 
+Provisioned stores live in their own `store-<slug>` namespaces and are not part of the `urumi`
+release: delete them from the dashboard (or `DELETE /v1/teams/{team}/stores/{id}`) before
+uninstalling, so the provisioner removes their namespaces, volumes and MCP database schemas.
+Uninstalling `urumi` first leaves them running without a provisioner.
+
 Never run `kubectl delete namespace urumi` or `helm uninstall store`: the first deletes the
 store's PersistentVolumeClaims with everything else in the namespace, and the second deletes the
 WordPress PVC (the MariaDB PVC, created from a StatefulSet template, survives). To make the
@@ -370,5 +386,6 @@ gateway.
 | MCP tool calls fail to reach the store | `kubectl -n urumi get pod -l app.kubernetes.io/name=woocommerce-mcp -o jsonpath='{.items[0].spec.hostAliases}'` should map `wordpress.local` to the `store-wordpress` ClusterIP; redeploy if the store Service was recreated. |
 | `421 Misdirected Request` from the MCP server | The `Host` the client sends is not in `MCP_ALLOWED_HOSTS`. |
 | Hosted server not ready, or `upstream_unauthorized` | See the troubleshooting table in [hosted-mcp.md](hosted-mcp.md). |
+| Provisioned store stuck or failed | The store's detail page shows the step and reason; see the troubleshooting table in [stores.md](stores.md). |
 | Dashboard shows "service unreachable" | `curl http://urumi.local/api/gateway/health/live`; check `GATEWAY_UPSTREAM`/`AGENT_UPSTREAM` and the NetworkPolicies. |
 | Images not found (`ErrImageNeverPull`/`ImagePullBackOff`) | Re-run `deploy-local.sh` (it imports the images into k3d). |

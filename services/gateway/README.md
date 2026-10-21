@@ -75,7 +75,8 @@ Clients name a connector by **slug**; the gateway looks up its URL in the regist
 only by platform admins and must match `UPSTREAM_ALLOWED_HOSTS` (`host:port` patterns), and
 redirects are never followed, so the gateway cannot be pointed at arbitrary hosts. Hosted servers
 (deployed from an allow-listed image with `POST /v1/hosted-servers`) get a URL the gateway builds
-from their in-cluster Service, which cannot be edited. On top of the host allow-list, the host is resolved at
+from their in-cluster Service, which cannot be edited; so do provisioned stores' MCP servers
+(`kind=store`, registered by the provisioner, visible to their own team only). On top of the host allow-list, the host is resolved at
 registration and before every call: link-local and cloud metadata addresses are always refused,
 and private or loopback addresses only when the host is named exactly (no wildcard) in the
 allow-list, so a broad pattern or a later DNS change cannot reach internal services
@@ -122,6 +123,7 @@ OpenAPI docs are served at `/docs` (`GATEWAY_DOCS_ENABLED`). Errors are always
 | Registry | `POST/GET /v1/connectors`, `GET/PATCH/DELETE /v1/connectors/{id}`, `POST /v1/connectors/{id}/probe` |
 | OAuth | `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource/v1/mcp`, `/register`, `/authorize`, `/token`, `/revoke` (MCP SDK handlers); `GET /v1/oauth/config`, `GET/POST /v1/oauth/requests/{id}[/decision]`, `GET/DELETE /v1/oauth/grants[/{id}]` |
 | Hosted servers | `GET /v1/hosted-servers/settings`, `POST/GET /v1/hosted-servers`, `GET/PATCH /v1/hosted-servers/{id}`, `POST …/{id}/restart` |
+| Stores | `GET /v1/stores/settings`, `GET/POST /v1/teams/{team}/stores` (`Idempotency-Key`), `GET/DELETE …/stores/{id}`, `POST …/stores/{id}/retry` ([docs/stores.md](../../docs/stores.md)) |
 | Team connectors | `GET /v1/teams/{team_id}/connectors`, `PUT/DELETE …/connectors/{slug}`, `GET …/connectors/{slug}/catalog` |
 | Grants | `GET /v1/teams/{team_id}/members/{user_id}/grants`, `PUT/DELETE …/grants/{slug}` |
 | Tools | `GET /v1/teams/{team_id}/tools`, `GET /v1/teams/{team_id}/connectors/{slug}/tools`, `POST …/tools/{tool}/call`, `/v1/mcp`, `/v1/mcp/{slug}` |
@@ -165,6 +167,8 @@ src/gateway/
   db/              SQLAlchemy models and engine
   security.py      Argon2id passwords, token issue/HMAC
   cli.py           gateway-admin (platform admin bootstrap)
+  stores/          store requests (caps, slugs) and store-connector registration
+  provisioner/     gateway-provisioner: store state machine, Helm runner, per-store Postgres roles
 alembic/           migrations
 ```
 
