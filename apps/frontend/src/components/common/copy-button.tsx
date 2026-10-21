@@ -1,15 +1,17 @@
 import { CheckIcon, CopyIcon } from "lucide-react"
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { copyText } from "@/lib/clipboard"
 
 export function CopyButton({ value, label = "Copy" }: { value: string; label?: string }) {
   const [copied, setCopied] = useState(false)
+  const buttonRef = useRef<HTMLButtonElement>(null)
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(value)
+      await copyText(value, buttonRef.current?.parentElement)
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch {
@@ -19,7 +21,14 @@ export function CopyButton({ value, label = "Copy" }: { value: string; label?: s
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button type="button" variant="ghost" size="icon-xs" onClick={copy} aria-label={label}>
+        <Button
+          ref={buttonRef}
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          onClick={copy}
+          aria-label={label}
+        >
           {copied ? <CheckIcon /> : <CopyIcon />}
         </Button>
       </TooltipTrigger>
