@@ -40,6 +40,9 @@ export const qk = {
   connectorStatus: (teamId: string, registry: boolean) =>
     ["connector-status", teamId, { registry }] as const,
   hosted: ["hosted-servers"] as const,
+  storeSettings: ["stores", "settings"] as const,
+  stores: (teamId: string) => ["teams", teamId, "stores"] as const,
+  store: (teamId: string, id: string) => ["teams", teamId, "stores", id] as const,
   hostedServer: (id: string) => ["hosted-servers", id] as const,
   teamConnectors: (teamId: string) => ["teams", teamId, "connectors"] as const,
   catalog: (teamId: string, slug: string) => ["teams", teamId, "connectors", slug, "catalog"] as const,

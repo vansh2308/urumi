@@ -7,6 +7,7 @@ import {
   ScrollTextIcon,
   ServerIcon,
   SettingsIcon,
+  StoreIcon,
   UsersIcon,
   WrenchIcon,
   type LucideIcon,
@@ -29,6 +30,7 @@ export const NAV_GROUPS: Array<{ label: string; items: NavItem[] }> = [
     items: [
       { title: "Overview", to: "/overview", icon: LayoutDashboardIcon, access: "member" },
       { title: "Chat", to: "/chat", icon: MessageSquareIcon, access: "member" },
+      { title: "Stores", to: "/stores", icon: StoreIcon, access: "member" },
       { title: "MCP servers", to: "/mcp-servers", icon: ServerIcon, access: "member" },
       { title: "Tools", to: "/tools", icon: WrenchIcon, access: "member" },
     ],

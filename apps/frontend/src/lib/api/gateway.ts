@@ -30,6 +30,10 @@ import type {
   RegisterConnectorRequest,
   RegisterRequest,
   Session,
+  Store,
+  StoreDetail,
+  StoreSettings,
+  CreatedStore,
   SummaryGroup,
   Team,
   TeamConnector,
@@ -163,6 +167,25 @@ export const gateway = {
       patch<HostedServer>(token, `/v1/hosted-servers/${id}`, body),
     restart: (token: string, id: string) =>
       post<HostedServer>(token, `/v1/hosted-servers/${id}/restart`),
+  },
+
+  stores: {
+    settings: (token: string) => get<StoreSettings>(token, "/v1/stores/settings"),
+    list: (token: string, teamId: string) => get<Store[]>(token, `${team(teamId)}/stores`),
+    get: (token: string, teamId: string, id: string) =>
+      get<StoreDetail>(token, `${team(teamId)}/stores/${id}`),
+    /** The key makes a retried request (double click, flaky network) return the same store. */
+    create: (token: string, teamId: string, name: string, idempotencyKey: string) =>
+      request<CreatedStore>(GATEWAY_URL, `${team(teamId)}/stores`, {
+        method: "POST",
+        token,
+        body: { name },
+        headers: { "Idempotency-Key": idempotencyKey },
+      }),
+    remove: (token: string, teamId: string, id: string) =>
+      request<Store>(GATEWAY_URL, `${team(teamId)}/stores/${id}`, { method: "DELETE", token }),
+    retry: (token: string, teamId: string, id: string) =>
+      post<Store>(token, `${team(teamId)}/stores/${id}/retry`),
   },
 
   connectors: {

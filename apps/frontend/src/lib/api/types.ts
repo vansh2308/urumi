@@ -159,8 +159,10 @@ export interface Connector {
   display_name: string
   description: string
   enabled: boolean
-  // Platform admins only:
   kind?: ConnectorKind
+  /** A provisioned store's connector: edit and delete happen through the store. */
+  managed?: boolean
+  // Platform admins only:
   url?: string
   /** Header name of the stored credential; the value is never returned. */
   credential?: { header_name: string; configured: boolean } | null
@@ -170,7 +172,7 @@ export interface Connector {
   updated_at?: string
 }
 
-export type ConnectorKind = "remote" | "hosted"
+export type ConnectorKind = "remote" | "hosted" | "store"
 
 /** A static credential the gateway sends upstream. Write-only. */
 export type CredentialInput =
@@ -288,6 +290,7 @@ export interface TeamConnector {
   slug: string
   display_name: string
   description: string
+  kind?: ConnectorKind
   team_policy: ToolSet | null
   your_access: ToolSet
 }
@@ -509,4 +512,60 @@ export interface AgentUsageSummary {
     failures: number
     avg_latency_ms: number | null
   }>
+}
+
+// --- provisioned stores --------------------------------------------------------------------------
+
+export type StoreStatus = "requested" | "provisioning" | "ready" | "failed" | "deleting" | "deleted"
+export type StorePhase = "Provisioning" | "Ready" | "Failed" | "Deleting" | "Deleted"
+
+export interface Store {
+  id: string
+  team_id: string
+  name: string
+  slug: string
+  status: StoreStatus
+  phase: StorePhase
+  /** The last provisioning step that finished. */
+  step: string | null
+  /** What it is waiting for while provisioning; why it failed when failed. */
+  status_reason: string | null
+  url: string
+  admin_url: string
+  namespace: string
+  connector_id: string | null
+  connector_slug: string | null
+  attempts: number
+  created_by_user_id: string | null
+  created_by_name: string | null
+  created_by_email: string | null
+  created_at: string
+  ready_at: string | null
+  deadline_at: string
+}
+
+export interface CreatedStore extends Store {
+  admin_username: string
+  /** Returned once, by the request that created the store. */
+  admin_password: string | null
+  created: boolean
+}
+
+export interface StoreEvent {
+  at: string
+  action: string
+  outcome: string
+  details: Record<string, unknown>
+}
+
+export interface StoreDetail extends Store {
+  events: StoreEvent[]
+}
+
+export interface StoreSettings {
+  enabled: boolean
+  max_per_user: number
+  max_total: number
+  provision_timeout_seconds: number
+  base_domain: string
 }

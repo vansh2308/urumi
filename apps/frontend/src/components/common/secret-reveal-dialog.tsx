@@ -20,12 +20,14 @@ export function SecretRevealDialog({
   title,
   description,
   children,
+  notice = "Copy it now. It is stored only as a hash and cannot be shown again.",
   onClose,
 }: {
   secret: string | null
   title: string
   description: ReactNode
   children?: ReactNode
+  notice?: ReactNode
   onClose: () => void
 }) {
   return (
@@ -41,9 +43,7 @@ export function SecretRevealDialog({
         </div>
         <Alert>
           <TriangleAlertIcon />
-          <AlertDescription>
-            Copy it now. It is stored only as a hash and cannot be shown again.
-          </AlertDescription>
+          <AlertDescription>{notice}</AlertDescription>
         </Alert>
         {children}
         <DialogFooter>

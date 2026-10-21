@@ -1,5 +1,5 @@
 import type { ColumnDef } from "@tanstack/react-table"
-import { ChevronDownIcon, MoreHorizontalIcon, PlusIcon, RefreshCwIcon } from "lucide-react"
+import { ChevronDownIcon, MoreHorizontalIcon, PlusIcon, RefreshCwIcon, StoreIcon } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router"
 import { toast } from "sonner"
@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/common/page-header"
 import { StatusBadge } from "@/components/common/status-badge"
 import { DataTable } from "@/components/data-table/data-table"
 import { PageBody } from "@/components/layout/app-shell"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -18,7 +19,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { describeAccess } from "@/features/connectors/access"
+import { describeAccess, isStoreServer } from "@/features/connectors/access"
 import { ConnectorFormDialog } from "@/features/connectors/connector-form-dialog"
 import { HealthBadge } from "@/features/connectors/health-badge"
 import { HostedServerDialog } from "@/features/connectors/hosted-server-dialog"
@@ -115,7 +116,14 @@ export default function McpServersPage() {
       header: "Server",
       cell: ({ row }) => (
         <Link to={`/mcp-servers/${row.original.slug}`} className="block min-w-0 hover:underline">
-          <div className="font-medium">{row.original.displayName}</div>
+          <div className="flex items-center gap-2 font-medium">
+            {row.original.displayName}
+            {isStoreServer(row.original) && (
+              <Badge variant="secondary" className="gap-1 font-normal">
+                <StoreIcon className="size-3" /> Store
+              </Badge>
+            )}
+          </div>
           <div className="font-mono text-xs text-muted-foreground">{row.original.slug}</div>
         </Link>
       ),
@@ -170,6 +178,7 @@ export default function McpServersPage() {
             header: "Type",
             cell: ({ row }) => {
               const h = row.original.hosted
+              if (row.original.registry?.kind === "store") return <span>Store (provisioned)</span>
               if (row.original.registry?.kind !== "hosted") return <span className="text-muted-foreground">URL</span>
               return (
                 <span className="inline-flex items-center gap-2">
@@ -236,16 +245,24 @@ export default function McpServersPage() {
                     <DropdownMenuSeparator />
                     <DropdownMenuLabel className="text-xs text-muted-foreground">Platform</DropdownMenuLabel>
                     <DropdownMenuItem onClick={() => runProbe(r.registry!)}>Probe server</DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setEditing(r.registry)}>Edit</DropdownMenuItem>
+                    {!r.registry.managed && (
+                      <DropdownMenuItem onClick={() => setEditing(r.registry)}>Edit</DropdownMenuItem>
+                    )}
                     <DropdownMenuItem
                       variant={r.registry.enabled ? "destructive" : "default"}
                       onClick={() => actions.setEnabled(r.registry!, !r.registry!.enabled)}
                     >
                       {r.registry.enabled ? "Disable" : "Enable"}
                     </DropdownMenuItem>
-                    <DropdownMenuItem variant="destructive" onClick={() => actions.deleteServer(r.registry!)}>
-                      Delete server
-                    </DropdownMenuItem>
+                    {r.registry.managed ? (
+                      <DropdownMenuItem asChild>
+                        <Link to="/stores">Manage on the Stores page</Link>
+                      </DropdownMenuItem>
+                    ) : (
+                      <DropdownMenuItem variant="destructive" onClick={() => actions.deleteServer(r.registry!)}>
+                        Delete server
+                      </DropdownMenuItem>
+                    )}
                   </>
                 )}
               </DropdownMenuContent>

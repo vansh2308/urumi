@@ -13,6 +13,8 @@ const ChatPage = lazy(() => import("@/pages/chat"))
 const McpServersPage = lazy(() => import("@/pages/mcp-servers"))
 const McpServerDetailPage = lazy(() => import("@/pages/mcp-server-detail"))
 const ToolsPage = lazy(() => import("@/pages/tools"))
+const StoresPage = lazy(() => import("@/pages/stores"))
+const StoreDetailPage = lazy(() => import("@/pages/store-detail"))
 const UsagePage = lazy(() => import("@/pages/usage"))
 const AuditLogsPage = lazy(() => import("@/pages/audit-logs"))
 const AgentMetricsPage = lazy(() => import("@/pages/agent-metrics"))
@@ -62,6 +64,8 @@ export const router = createBrowserRouter([
               { path: "mcp-servers", element: page(<McpServersPage />) },
               { path: "mcp-servers/:serverId", element: page(<McpServerDetailPage />) },
               { path: "tools", element: page(<ToolsPage />) },
+              { path: "stores", element: page(<StoresPage />) },
+              { path: "stores/:storeId", element: page(<StoreDetailPage />) },
               { path: "usage", element: page(<UsagePage />) },
               { path: "audit-logs", element: page(<AuditLogsPage />) },
               { path: "agent-metrics", element: page(<AgentMetricsPage />) },

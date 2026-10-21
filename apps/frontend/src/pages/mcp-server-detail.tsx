@@ -152,7 +152,17 @@ export default function McpServerDetailPage() {
       </Button>
       <PageHeader
         title={name}
-        description={description || undefined}
+        description={
+          connector?.kind === "store" || team?.kind === "store" ? (
+            <span className="inline-flex flex-wrap items-center gap-2">
+              <Badge variant="secondary" className="font-normal">Store</Badge>
+              {description}
+              <Link to="/stores" className="underline">Manage on the Stores page</Link>
+            </span>
+          ) : (
+            description || undefined
+          )
+        }
         actions={
           <>
             <Button
@@ -177,9 +187,11 @@ export default function McpServerDetailPage() {
             )}
             {isPlatformAdmin && connector && (
               <>
-                <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-                  <PencilIcon /> Edit
-                </Button>
+                {!connector.managed && (
+                  <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
+                    <PencilIcon /> Edit
+                  </Button>
+                )}
                 <Button
                   variant={connector.enabled ? "destructive" : "default"}
                   size="sm"
@@ -187,9 +199,11 @@ export default function McpServerDetailPage() {
                 >
                   <PowerIcon /> {connector.enabled ? "Disable" : "Enable"}
                 </Button>
-                <Button variant="outline" size="sm" onClick={() => actions.deleteServer(connector)}>
-                  <Trash2Icon /> Delete
-                </Button>
+                {!connector.managed && (
+                  <Button variant="outline" size="sm" onClick={() => actions.deleteServer(connector)}>
+                    <Trash2Icon /> Delete
+                  </Button>
+                )}
               </>
             )}
           </>
@@ -330,7 +344,13 @@ export default function McpServerDetailPage() {
                   {connector.url && <CopyButton value={connector.url} label="Copy URL" />}
                 </span>
               </Meta>
-              <Meta label="Type">{connector.kind === "hosted" ? "Hosted (platform-managed URL)" : "Registered by URL"}</Meta>
+              <Meta label="Type">
+                {connector.kind === "store"
+                  ? "Provisioned store (managed on the Stores page)"
+                  : connector.kind === "hosted"
+                    ? "Hosted (platform-managed URL)"
+                    : "Registered by URL"}
+              </Meta>
               <Meta label="Credential">
                 {connector.credential ? (
                   <span>
