@@ -23,6 +23,7 @@ dependencies = [
 [project.scripts]
 gateway = "gateway.__main__:main"
 gateway-admin = "gateway.cli:main"
+gateway-provisioner = "gateway.provisioner.main:main"
 
 [tool.poetry]
 packages = [{ include = "gateway", from = "src" }]
@@ -59,6 +60,11 @@ strict = true
 plugins = ["pydantic.mypy"]
 mypy_path = "src"
 packages = ["gateway"]
+
+[[tool.mypy.overrides]]
+# asyncpg ships no type information; only the provisioner's MCP database code uses it directly.
+module = ["asyncpg", "asyncpg.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

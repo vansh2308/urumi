@@ -26,6 +26,28 @@ COPY README.md ./
 COPY src ./src
 RUN pip install --no-deps . && pip uninstall -y pip
 
+# --- helm: pinned binary for the store provisioner (checksums from get.helm.sh) ----------------
+FROM ${PYTHON_IMAGE} AS helm
+ARG TARGETARCH
+ARG HELM_VERSION=4.3.0
+ARG HELM_SHA256_AMD64=86584a54def73570558f66f5111cc53dfed56689637ae32c1201205d494f54fb
+ARG HELM_SHA256_ARM64=31c5794dd55c66a51e6b7d2e2ac7a114ae8b1de41ff1d9ba51748ac973b06a08
+ADD https://get.helm.sh/helm-v${HELM_VERSION}-linux-${TARGETARCH}.tar.gz /tmp/helm.tgz
+RUN case "${TARGETARCH}" in \
+      amd64) sum="${HELM_SHA256_AMD64}" ;; \
+      arm64) sum="${HELM_SHA256_ARM64}" ;; \
+      *) echo "unsupported architecture ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+ && echo "${sum}  /tmp/helm.tgz" | sha256sum -c - \
+ && tar -xzf /tmp/helm.tgz -C /tmp \
+ && install -m 0755 "/tmp/linux-${TARGETARCH}/helm" /usr/local/bin/helm
+
+# --- the urumi-store chart for the provisioner --------------------------------------------------
+# Empty unless the build passes it (deploy/scripts/deploy-local.sh does):
+#   --build-context store-chart=deploy/helm/urumi-store
+# after deploy/scripts/package-store-chart.sh has put its dependencies into charts/.
+FROM scratch AS store-chart
+
 # --- runtime: interpreter, virtualenv, migrations; non-root ------------------------------------
 FROM ${PYTHON_IMAGE} AS runtime
 ARG UID=10001
@@ -43,6 +65,10 @@ COPY --from=build /opt/venv /opt/venv
 # `gateway-admin` is installed in the virtualenv.
 COPY alembic.ini ./
 COPY alembic ./alembic
+# The provisioner (`gateway-provisioner`, same image) installs stores with these; the gateway
+# itself never calls Helm.
+COPY --from=helm /usr/local/bin/helm /usr/local/bin/helm
+COPY --from=store-chart / /opt/urumi/charts/urumi-store/
 USER ${UID}:${UID}
 EXPOSE 8100
 # Liveness only (no dependencies); orchestrators use /health/ready for traffic.

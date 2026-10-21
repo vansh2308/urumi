@@ -334,6 +334,78 @@ class StoreSettings(BaseSettings):
         return f"{self.namespace_prefix}{slug}"
 
 
+class ProvisionerSettings(BaseSettings):
+    """The store provisioner (``gateway-provisioner``): how it reaches the cluster, what it
+    installs and its limits. Only the provisioner reads these."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="PROVISIONER_", env_file=_ENV_FILE, extra="ignore", frozen=True
+    )
+
+    workers: int = Field(default=3, ge=1, le=20, description="Stores provisioned at once.")
+    poll_interval_seconds: float = Field(default=3.0, gt=0)
+    step_poll_seconds: float = Field(default=5.0, gt=0, description="Readiness polling.")
+    lease_seconds: int = Field(default=60, ge=15, description="Renewed every quarter of it.")
+    max_attempts: int = Field(default=3, ge=1, description="Retries of a failing step.")
+    drift_interval_seconds: int = Field(default=300, ge=0, description="0 disables it.")
+    teardown_wait_seconds: int = Field(default=300, ge=10)
+    worker_id: str = Field(default="", description="Lease owner name; default host name.")
+    health_port: int = Field(default=8110, ge=1, le=65535)
+    health_host: str = "0.0.0.0"  # noqa: S104 - probes inside the pod network
+
+    # What a store release is made of.
+    chart_path: str = Field(default="/opt/urumi/charts/urumi-store")
+    helm_binary: str = "helm"
+    helm_timeout_seconds: int = Field(default=180, ge=10)
+    store_image: str = Field(
+        default="docker.io/urumi/store-wordpress:dev",
+        description="registry/repository:tag (or @sha256:...) of the store WordPress image.",
+    )
+    mcp_image: str = Field(default="urumi/woocommerce-mcp:dev")
+    image_pull_policy: Literal["IfNotPresent", "Always", "Never"] = "IfNotPresent"
+    store_app_env: Environment = Field(
+        default=Environment.LOCAL, description="APP_ENV of each store's MCP server."
+    )
+    ingress_class: str = "traefik"
+    tls_cluster_issuer: str = Field(default="", description="cert-manager issuer when TLS.")
+    storage_class: str = Field(default="", description="Empty = the cluster default.")
+    wordpress_volume: str = "2Gi"
+    mariadb_volume: str = "2Gi"
+    seed_demo_products: bool = True
+    # Where the gateway runs: only its pods may call a store's MCP server.
+    gateway_namespace: str = "urumi"
+    gateway_pod_label: str = Field(
+        default="app.kubernetes.io/name=gateway", pattern=r"^[A-Za-z0-9./_-]+=[A-Za-z0-9._-]+$"
+    )
+    ingress_namespace: str = "kube-system"
+    ingress_pod_label: str = Field(
+        default="app.kubernetes.io/name=traefik", pattern=r"^[A-Za-z0-9./_-]+=[A-Za-z0-9._-]+$"
+    )
+    # The ClusterRole bound in every store namespace (what Helm creates there).
+    store_cluster_role: str = "urumi-store-manager"
+    service_account_name: str = "provisioner"
+    service_account_namespace: str = "urumi"
+
+    # Each store's MCP server gets a Postgres role + schema in this database. The DSN must be
+    # allowed to CREATE ROLE (e.g. the database owner). Provisioner-only secret.
+    mcp_admin_dsn: SecretStr | None = None
+
+    # Kubernetes API (in-cluster defaults).
+    api_url: str = Field(default="https://kubernetes.default.svc")
+    service_account_dir: str = Field(default="/var/run/secrets/kubernetes.io/serviceaccount")
+    request_timeout_seconds: float = Field(default=10.0, gt=0)
+
+    @property
+    def namespace(self) -> str:
+        # KubeConnection: the provisioner always names the namespace per call.
+        return self.service_account_namespace
+
+    @staticmethod
+    def label_pair(label: str) -> tuple[str, str]:
+        key, _, value = label.partition("=")
+        return key, value
+
+
 class OAuthSettings(BaseSettings):
     """OAuth 2.1 for MCP clients (MCP authorization spec): the gateway is the authorization
     server for its own MCP endpoint. Access tokens are short-lived platform API keys."""

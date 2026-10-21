@@ -9,6 +9,7 @@ pool. Keep the Kubernetes ``terminationGracePeriodSeconds`` above that grace per
 from __future__ import annotations
 
 import sys
+from typing import NoReturn
 
 import uvicorn
 from pydantic import ValidationError
@@ -20,7 +21,12 @@ from gateway.config import Settings
 def load_settings() -> Settings:
     try:
         return Settings()
-    except ValidationError as exc:
+    except Exception as exc:
+        report_invalid_settings(exc)
+
+
+def report_invalid_settings(exc: Exception) -> NoReturn:
+    if isinstance(exc, ValidationError):
         # Report locations and messages only: input values may be credentials.
         problems = "\n".join(
             f"  {'.'.join(str(p) for p in err['loc']) or exc.title}: {err['msg']}"
@@ -28,9 +34,10 @@ def load_settings() -> Settings:
         )
         print(f"Invalid configuration ({exc.title}):\n{problems}", file=sys.stderr)
         raise SystemExit(2) from None
-    except ValueError as exc:
+    if isinstance(exc, ValueError):
         print(f"Invalid configuration: {exc}", file=sys.stderr)
         raise SystemExit(2) from None
+    raise exc
 
 
 def main() -> None:
